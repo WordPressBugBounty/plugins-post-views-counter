@@ -2,7 +2,7 @@
 /*
 Plugin Name: Post Views Counter
 Description: Post Views Counter allows you to display how many times a post, page or custom post type had been viewed in a simple, fast and reliable way.
-Version: 1.5.3
+Version: 1.5.4
 Author: dFactory
 Author URI: https://dfactory.co/
 Plugin URI: https://postviewscounter.com/
@@ -30,7 +30,7 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 	 * Post Views Counter final class.
 	 *
 	 * @class Post_Views_Counter
-	 * @version	1.5.3
+	 * @version	1.5.4
 	 */
 	final class Post_Views_Counter {
 
@@ -54,6 +54,7 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 					'number'	=> 0,
 					'type'		=> 'days'
 				],
+				'caching_compatibility'	=> false,
 				'object_cache'			=> false,
 				'flush_interval'		=> [
 					'number'	=> 0,
@@ -100,7 +101,7 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 				'deactivation_delete'	=> false,
 				'license'				=> ''
 			],
-			'version'	=> '1.5.3'
+			'version'	=> '1.5.4'
 		];
 
 		// instances
@@ -110,6 +111,7 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 		public $dashboard;
 		public $frontend;
 		public $functions;
+		public $settings;
 		public $settings_api;
 
 		/**
@@ -165,7 +167,9 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 					self::$instance->functions = new Post_Views_Counter_Functions();
 
 					new Post_Views_Counter_Update();
-					new Post_Views_Counter_Settings();
+
+					self::$instance->settings = new Post_Views_Counter_Settings();
+
 					new Post_Views_Counter_Admin();
 					new Post_Views_Counter_Query();
 
