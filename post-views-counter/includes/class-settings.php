@@ -70,17 +70,17 @@ class Post_Views_Counter_Settings {
 						<div class="inner">
 							<div class="pvc-sidebar-info">
 								<div class="pvc-sidebar-head">
-									<p>' . esc_html__( "You're using", 'post-views-counter' ) . '</p>
-									<h2>Post Views Counter</h2>
-									<h2>Lite</h2>
+									<h3 class="pvc-sidebar-title">Get Post Views Counter Pro</h3>
 								</div>
 								<div class="pvc-sidebar-body">
-									<p><span class="pvc-icon pvc-icon-arrow-right"></span>' . __( 'Get <b>more accurate information</b> about the number of views of your site, regardless of what the user is visiting.', 'post-views-counter' ) . '</p>
-									<p><span class="pvc-icon pvc-icon-arrow-right"></span>' . __( 'Unlock <b>optimization features</b> and speed up view count tracking.', 'post-views-counter' ) . '</p>
-									<p><span class="pvc-icon pvc-icon-arrow-right"></span>' . __( 'Take your insights to the next level with dedicated, <b>customizable reporting</b>.', 'post-views-counter' ) . '</p>
+									<p><span class="pvc-icon pvc-icon-check"></span>' . __( '<b>Collect more accurate data</b> about the number of views of your site, regardless of what the user is visiting.', 'post-views-counter' ) . '</p>
+									<p><span class="pvc-icon pvc-icon-check"></span>' . __( '<b>Unlock optimization features</b> and caching plugins compatibility to speed up view count tracking.', 'post-views-counter' ) . '</p>
+									<p><span class="pvc-icon pvc-icon-check"></span>' . __( '<b>Take your insights to the next level</b> with customizable Views by Date, Post and Author reporting.', 'post-views-counter' ) . '</p>
+									<p><span class="pvc-icon pvc-icon-check"></span>' . __( '<b>Order posts by views count</b> using built-in Elementor Pro, Divi Theme and GenerateBlocks integration.', 'post-views-counter' ) . '</p>
 								</div>
 								<div class="pvc-pricing-footer">
-									<a href="https://postviewscounter.com/upgrade/?utm_source=post-views-counter-lite&utm_medium=button&utm_campaign=upgrade-to-pro" class="button button-secondary button-hero pvc-button" target="_blank">' . esc_html__( 'Upgrade to Pro', 'post-views-counter' ) . '</a>
+									<a href="https://postviewscounter.com/upgrade/?utm_source=post-views-counter-lite&utm_medium=button&utm_campaign=upgrade-to-pro" class="button button-secondary button-hero pvc-button" target="_blank">' . esc_html__( 'Upgrade to Pro', 'post-views-counter' ) . ' &rarr;</a>
+									<p>Starting from $29 per year<br />14-day money back guarantee.</p>
 								</div>
 							</div>
 						</div>
@@ -288,6 +288,21 @@ class Post_Views_Counter_Settings {
 					'callback'		=> [ $this, 'setting_time_between_counts' ],
 					'validate'		=> [ $this, 'validate_time_between_counts' ]
 				],
+				'count_time' => [
+					'tab'			=> 'general',
+					'title'			=> __( 'Count Time', 'post-views-counter' ),
+					'section'		=> 'post_views_counter_general_settings',
+					'type'			=> 'radio',
+					'class'			=> 'pvc-pro',
+					'skip_saving'	=> true,
+					'description'	=> __( "Whether to store the views using GMT timezone or adjust it to the GMT offset of the site.", 'post-views-counter' ),
+					'options'		=> [
+						'gmt'		=> __( 'GMT Time', 'post-views-counter' ),
+						'local'	=> __( 'Local Time', 'post-views-counter' )
+					],
+					'disabled'		=> [ 'gmt', 'local' ],
+					'value'			=> 'gmt'
+				],
 				'strict_counts' => [
 					'tab'			=> 'general',
 					'title'			=> __( 'Strict counts', 'post-views-counter' ),
@@ -425,7 +440,7 @@ class Post_Views_Counter_Settings {
 					'section'		=> 'post_views_counter_display_settings',
 					'type'			=> 'boolean',
 					'description'	=> '',
-					'label'			=> __( 'Enable to display post views count admin column for each counted content type.', 'post-views-counter' )
+					'label'			=> __( 'Enable to display views count admin column.', 'post-views-counter' )
 				],
 				'restrict_edit_views' => [
 					'tab'			=> 'display',
@@ -433,7 +448,7 @@ class Post_Views_Counter_Settings {
 					'section'		=> 'post_views_counter_display_settings',
 					'type'			=> 'boolean',
 					'description'	=> '',
-					'label'			=> __( 'Enable to restrict post views editing to admins only.', 'post-views-counter' )
+					'label'			=> __( 'Enable to allow views count editing.', 'post-views-counter' )
 				],
 				'dynamic_loading' => [
 					'tab'			=> 'display',
@@ -614,6 +629,9 @@ class Post_Views_Counter_Settings {
 			]
 		];
 
+		// update admin title
+		add_filter( 'admin_title', [ $this, 'admin_title' ], 10, 2 );
+
 		// submenu?
 		if ( $pvc->options['other']['menu_position'] === 'sub' ) {
 			$pages['post-views-counter']['type'] = 'settings_page';
@@ -692,6 +710,7 @@ class Post_Views_Counter_Settings {
 	 *
 	 * @param string|null $submenu_file
 	 * @param string $parent_file
+	 *
 	 * @return string|null
 	 */
 	public function submenu_file( $submenu_file, $parent_file ) {
@@ -706,11 +725,58 @@ class Post_Views_Counter_Settings {
 	}
 
 	/**
+	 * Update admin title.
+	 *
+	 * @global array $submenu
+	 * @global string $pagenow
+	 *
+	 * @param string $admin_title
+	 * @param string $title
+	 *
+	 * @return string
+	 */
+	public function admin_title( $admin_title, $title ) {
+		global $submenu, $pagenow;
+
+		// get main instance
+		$pvc = Post_Views_Counter();
+
+		if ( isset( $_GET['page'] ) && $_GET['page'] === 'post-views-counter' ) {
+			if ( $pvc->options['other']['menu_position'] === 'sub' && $pagenow === 'options-general.php' ) {
+				// get tab
+				$tab = isset( $_GET['tab'] ) ? sanitize_key( $_GET['tab'] ) : 'general';
+
+				// get settings pages
+				$pages = $pvc->settings_api->get_pages();
+
+				if ( array_key_exists( $tab, $pages['post-views-counter']['tabs'] ) ) {
+					// update title
+					$admin_title = preg_replace( '/' . $pages['post-views-counter']['page_title'] . '/', $pages['post-views-counter']['page_title'] . ' - ' . $pages['post-views-counter']['tabs'][$tab]['label'], $admin_title, 1 );
+				}
+			} else if ( $pvc->options['other']['menu_position'] === 'top' && get_admin_page_parent() === 'post-views-counter' && ! empty( $submenu['post-views-counter'] ) ) {
+				// get tab
+				$tab = isset( $_GET['tab'] ) ? sanitize_key( $_GET['tab'] ) : 'general';
+
+				// get settings pages
+				$pages = $pvc->settings_api->get_pages();
+
+				if ( array_key_exists( 'post-views-counter-' . $tab, $pages ) ) {
+					// update title
+					$admin_title = $pages['post-views-counter']['page_title'] . ' - ' . preg_replace( '/' . $title . '/', $pages['post-views-counter-' . $tab]['page_title'], $admin_title, 1 );
+				}
+			}
+		}
+
+		return $admin_title;
+	}
+
+	/**
 	 * Validate options.
 	 *
 	 * @global object $wpdb
 	 *
 	 * @param array $input
+	 *
 	 * @return array
 	 */
 	public function validate_settings( $input ) {
