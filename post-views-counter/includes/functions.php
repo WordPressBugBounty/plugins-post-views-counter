@@ -19,12 +19,18 @@ if ( ! defined( 'ABSPATH' ) )
  *
  * @param int|array $post_id
  * @param string $period
+ * @param array $args Optional arguments to override period parsing
  *
  * @return int
  */
 if ( ! function_exists( 'pvc_get_post_views' ) ) {
-	function pvc_get_post_views( $post_id = 0, $period = 'total' ) {
+	function pvc_get_post_views( $post_id = 0, $period = 'total', $args = [] ) {
 		global $wpdb;
+
+		// ensure args is an array
+		if ( ! is_array( $args ) ) {
+			$args = [];
+		}
 
 		// sanitize period
 		$period = sanitize_key( $period );
@@ -45,8 +51,58 @@ if ( ! function_exists( 'pvc_get_post_views' ) ) {
 		// set where clause
 		$where = [ 'type' => 'type = 4' ];
 
+		// override type if explicitly provided in args
+		if ( isset( $args['type'] ) ) {
+			$where['type'] = 'type = ' . (int) $args['type'];
+			if ( ! isset( $args['content'] ) )
+				$where['content'] = 'content = 0';
+		} elseif ( isset( $args['period_type'] ) ) {
+			$period_type = sanitize_key( $args['period_type'] );
+			$type_map = [
+				'day'   => 0,
+				'week'  => 1,
+				'month' => 2,
+				'year'  => 3,
+				'total' => 4
+			];
+			if ( isset( $type_map[ $period_type ] ) ) {
+				$where['type'] = 'type = ' . $type_map[ $period_type ];
+				if ( ! isset( $args['content'] ) )
+					$where['content'] = 'content = 0';
+			}
+		}
+
+		// optional period range (e.g., for day-based ranges within a month)
+		$range_from = null;
+		$range_to = null;
+
+		if ( isset( $args['period_range'] ) && is_array( $args['period_range'] ) ) {
+			$range = array_values( $args['period_range'] );
+			if ( isset( $range[0], $range[1] ) ) {
+				$range_from = (int) $range[0];
+				$range_to = (int) $range[1];
+			}
+		} elseif ( isset( $args['period_from'], $args['period_to'] ) ) {
+			$range_from = (int) $args['period_from'];
+			$range_to = (int) $args['period_to'];
+		}
+
+		if ( $range_from && $range_to ) {
+			$range_min = min( $range_from, $range_to );
+			$range_max = max( $range_from, $range_to );
+
+			$where['period'] = 'CAST( period AS SIGNED ) <= ' . $range_max . ' AND CAST( period AS SIGNED ) >= ' . $range_min;
+
+			// default to day type when using explicit ranges and no type set
+			if ( ! isset( $where['type'] ) ) {
+				$where['type'] = 'type = 0';
+				if ( ! isset( $args['content'] ) )
+					$where['content'] = 'content = 0';
+			}
+		}
+
 		// update where clause
-		$where = apply_filters( 'pvc_get_post_views_period_where', $where, $period, $post_id );
+		$where = apply_filters( 'pvc_get_post_views_period_where', $where, $period, $post_id, $args );
 
 		// updated where clause
 		$_where = [];
@@ -119,7 +175,7 @@ if ( ! function_exists( 'pvc_get_post_views' ) ) {
 			wp_cache_add( $query_hash, $post_views, 'pvc-get_post_views', $expire );
 		}
 
-		return (int) apply_filters( 'pvc_get_post_views', $post_views, $post_id, $period );
+		return (int) apply_filters( 'pvc_get_post_views', $post_views, $post_id, $period, $args );
 	}
 }
 
@@ -469,6 +525,8 @@ if ( ! function_exists( 'pvc_get_views' ) ) {
 			$query_data
 		);
 
+		$query = apply_filters( 'pvc_get_views_query_sql', $query, $args, $views_query );
+
 		// get cached data
 		$post_views = wp_cache_get( md5( $query ), 'pvc-get_views' );
 
@@ -812,7 +870,7 @@ if ( ! function_exists( 'pvc_period2date' ) ) {
 
 				// month
 				case 6:
-					$datetime = date_create_from_format( 'Ym' , $period );
+					$datetime = date_create_from_format( 'Ymd' , $period . '01' );
 					break;
 				// year
 				case 4:

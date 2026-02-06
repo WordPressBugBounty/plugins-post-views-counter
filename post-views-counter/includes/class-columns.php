@@ -25,9 +25,7 @@ class Post_Views_Counter_Columns {
 		add_action( 'bulk_edit_custom_box', [ $this, 'quick_edit_custom_box' ], 10, 2 );
 		add_action( 'quick_edit_custom_box', [ $this, 'quick_edit_custom_box' ], 10, 2 );
 		add_action( 'wp_ajax_save_bulk_post_views', [ $this, 'save_bulk_post_views' ] );
-		add_action( 'wp_loaded', [ $this, 'maybe_load_admin_bar_menu' ] );
 	}
-
 	/**
 	 * Output post views for single post.
 	 *
@@ -45,6 +43,7 @@ class Post_Views_Counter_Columns {
 		if ( ! $pvc->options['display']['post_views_column'] || ! in_array( $post->post_type, $pvc->options['general']['post_types_count'] ) )
 			return;
 
+		// check if user can see post stats
 		if ( apply_filters( 'pvc_admin_display_post_views', true, $post->ID ) === false )
 			return;
 
@@ -184,6 +183,7 @@ class Post_Views_Counter_Columns {
 
 					// filters
 					add_filter( 'manage_' . $post_type . '_posts_columns', [ $this, 'add_new_column' ] );
+					add_filter( 'manage_edit-' . $post_type . '_columns', [ $this, 'add_new_column' ], 20 );
 					add_filter( 'manage_edit-' . $post_type . '_sortable_columns', [ $this, 'register_sortable_custom_column' ] );
 
 					// bbPress?
@@ -213,10 +213,11 @@ class Post_Views_Counter_Columns {
 		// break if display is disabled
 		if ( ! $pvc->options['display']['post_views_column'] || ! in_array( $post_type, $pvc->options['general']['post_types_count'] ) )
 			return $columns;
-		
+
+		// check if user can see stats
 		if ( apply_filters( 'pvc_admin_display_post_views', true ) === false )
 			return $columns;
-		
+
 		// add new sortable column
 		$columns['post_views'] = 'post_views';
 
@@ -249,7 +250,7 @@ class Post_Views_Counter_Columns {
 		}
 
 		// add post views column
-		$columns['post_views'] = '<span class="dash-icon dashicons dashicons-chart-bar" title="' . esc_attr__( 'Post Views', 'post-views-counter' ) . '"><span class="screen-reader-text">' . esc_attr__( 'Post Views', 'post-views-counter' ) . '</span></span>';
+		$columns['post_views'] = '<span class="pvc-views-header" title="' . esc_attr__( 'Post Views', 'post-views-counter' ) . '"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor"><path d="M12 2a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1h-1ZM6.5 6a1 1 0 0 1 1-1h1a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-1a1 1 0 0 1-1-1V6ZM2 9a1 1 0 0 1 1-1h1a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V9Z" /></svg><span class="screen-reader-text">' . esc_attr__( 'Post Views', 'post-views-counter' ) . '</span></span>';
 
 		// restore date column
 		if ( isset( $date ) )
@@ -274,10 +275,31 @@ class Post_Views_Counter_Columns {
 			// get total post views
 			$count = pvc_get_post_views( $id );
 			
-			if ( apply_filters( 'pvc_admin_display_post_views', true, $id ) === false )
-				$count = '—';
+			// check if user can see stats
+			if ( apply_filters( 'pvc_admin_display_post_views', true, $id ) === false ) {
+				echo '—';
+				return;
+			}
 
-			echo esc_html( $count );
+			// get post title
+			$post_title = get_the_title( $id );
+
+			if ( $post_title === '' )
+				$post_title = __( '(no title)', 'post-views-counter' );
+
+			// get post type labels
+			$post_type_object = get_post_type_object( get_post_type( $id ) );
+
+			if ( $post_type_object ) {
+				$post_type_labels = get_post_type_labels( $post_type_object );
+			}
+
+			if ( $post_type_labels ) {
+				$post_title = $post_type_labels->singular_name . ': ' . $post_title;
+			}
+
+			// clickable link (modal opening handled via JavaScript)
+			echo '<a href="#" class="pvc-view-chart" data-post-id="' . esc_attr( $id ) . '" data-post-title="' . esc_attr( $post_title ) . '">' . esc_html( $count ) . '</a>';
 		}
 	}
 
@@ -309,6 +331,7 @@ class Post_Views_Counter_Columns {
 		if ( ! $pvc->options['display']['post_views_column'] || ! in_array( $post_type, $pvc->options['general']['post_types_count'] ) )
 			return;
 		
+		// check if user can see stats
 		if ( apply_filters( 'pvc_admin_display_post_views', true, $post->ID ) === false )
 			return;
 
@@ -387,204 +410,5 @@ class Post_Views_Counter_Columns {
 		}
 
 		exit;
-	}
-
-	/**
-	 * Add admin bar stats to a post.
-	 *
-	 * @return void
-	 */
-	public function maybe_load_admin_bar_menu() {
-		// get main instance
-		$pvc = Post_Views_Counter();
-
-		// statistics disabled?
-		if ( ! apply_filters( 'pvc_display_toolbar_statistics', $pvc->options['display']['toolbar_statistics'] ) )
-			return;
-
-		// skip for not logged in users
-		if ( ! is_user_logged_in() )
-			return;
-
-		// skip users with turned off admin bar at frontend
-		if ( ! is_admin() && get_user_option( 'show_admin_bar_front' ) !== 'true' )
-			return;
-
-		if ( is_admin() )
-			add_action( 'admin_init', [ $this, 'admin_bar_maybe_add_style' ] );
-		else
-			add_action( 'wp', [ $this, 'admin_bar_maybe_add_style' ] );
-	}
-
-	/**
-	 * Add admin bar stats to a post.
-	 *
-	 * @global string $pagenow
-	 * @global string $post
-	 *
-	 * @param object $admin_bar
-	 * @return void
-	 */
-	public function admin_bar_menu( $admin_bar ) {
-		// get main instance
-		$pvc = Post_Views_Counter();
-
-		// set empty post
-		$post = null;
-
-		// admin?
-		if ( is_admin() && ! wp_doing_ajax() ) {
-			global $pagenow;
-
-			$post = ( $pagenow === 'post.php' && ! empty( $_GET['post'] ) ) ? get_post( (int) $_GET['post'] ) : $post;
-		// frontend?
-		} elseif ( is_singular() )
-			global $post;
-
-		// get countable post types
-		$post_types = $pvc->options['general']['post_types_count'];
-
-		// break if display is not allowed
-		if ( empty( $post_types ) || empty( $post ) || ! in_array( $post->post_type, $post_types, true ) )
-			return;
-
-		if ( apply_filters( 'pvc_admin_display_post_views', true ) === false )
-			return;
-
-		$dt = new DateTime();
-
-		// get post views
-		$views = pvc_get_views(
-			[
-				'post_id'		=> $post->ID,
-				'post_type'		=> $post->post_type,
-				'fields'		=> 'date=>views',
-				'views_query'	=> [
-					'year'	=> $dt->format( 'Y' ),
-					'month'	=> $dt->format( 'm' )
-				]
-			]
-		);
-
-		$graph = '';
-
-		// get highest value
-		$views_copy = $views;
-
-		arsort( $views_copy, SORT_NUMERIC );
-
-		$highest = reset( $views_copy );
-
-		// find the multiplier
-		$multiplier = $highest * 0.05;
-
-		// generate ranges
-		$ranges = [];
-
-		for ( $i = 1; $i <= 20; $i ++  ) {
-			$ranges[$i] = round( $multiplier * $i );
-		}
-
-		// create graph
-		foreach ( $views as $date => $count ) {
-			$count_class = 0;
-
-			if ( $count > 0 ) {
-				foreach ( $ranges as $index => $range ) {
-					if ( $count <= $range ) {
-						$count_class = $index;
-						break;
-					}
-				}
-			}
-
-			$graph .= '<span class="pvc-line-graph pvc-line-graph-' . $count_class . '" title="' . sprintf( _n( '%s post view', '%s post views', $count, 'post-views-counter' ), number_format_i18n( $count ) ) . '"></span>';
-		}
-
-		$admin_bar->add_menu(
-			[
-				'id'	=> 'pvc-post-views',
-				'title'	=> '<span class="pvc-graph-container">' . $graph . '</span>',
-				'href'	=> false,
-				'meta'	=> [
-					'title' => false
-				]
-			]
-		);
-	}
-
-	/**
-	 * Maybe add admin CSS.
-	 *
-	 * @global string $pagenow
-	 * @global string $post
-	 *
-	 * @return void
-	 */
-	public function admin_bar_maybe_add_style() {
-		// get main instance
-		$pvc = Post_Views_Counter();
-
-		// set empty post
-		$post = null;
-
-		// admin?
-		if ( is_admin() && ! wp_doing_ajax() ) {
-			global $pagenow;
-
-			$post = ( $pagenow === 'post.php' && ! empty( $_GET['post'] ) ) ? get_post( (int) $_GET['post'] ) : $post;
-		// frontend?
-		} elseif ( is_singular() )
-			global $post;
-
-		// get countable post types
-		$post_types = $pvc->options['general']['post_types_count'];
-
-		// break if display is not allowed
-		if ( empty( $post_types ) || empty( $post ) || ! in_array( $post->post_type, $post_types, true ) )
-			return;
-
-		if ( apply_filters( 'pvc_admin_display_post_views', true ) === false )
-			return;
-
-		// add admin bar
-		add_action( 'admin_bar_menu', [ $this, 'admin_bar_menu' ], 100 );
-
-		// backend
-		if ( current_action() === 'admin_init' )
-			add_action( 'admin_head', [ $this, 'admin_bar_css' ] );
-		// frontend
-		elseif ( current_action() === 'wp' )
-			add_action( 'wp_head', [ $this, 'admin_bar_css' ] );
-	}
-
-	/**
-	 * Add admin CSS.
-	 *
-	 * @return void
-	 */
-	public function admin_bar_css() {
-		$html = '
-		<style type="text/css">
-			#wp-admin-bar-pvc-post-views .pvc-graph-container { padding-top: 6px; padding-bottom: 6px; position: relative; display: block; height: 100%; box-sizing: border-box; }
-			#wp-admin-bar-pvc-post-views .pvc-line-graph {
-				display: inline-block;
-				width: 1px;
-				margin-right: 1px;
-				background-color: #ccc;
-				vertical-align: baseline;
-			}
-			#wp-admin-bar-pvc-post-views .pvc-line-graph:hover { background-color: #eee; }
-			#wp-admin-bar-pvc-post-views .pvc-line-graph-0 { height: 1% }';
-
-		for ( $i = 1; $i <= 20; $i ++  ) {
-			$html .= '
-			#wp-admin-bar-pvc-post-views .pvc-line-graph-' . $i . ' { height: ' . $i * 5 . '% }';
-		}
-
-		$html .= '
-		</style>';
-
-		echo wp_kses( $html, [ 'style' => [] ] );
 	}
 }

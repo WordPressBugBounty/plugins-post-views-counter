@@ -2,39 +2,60 @@
 Contributors: dfactory
 Tags: counter, postviews, statistics, analytics, pageviews
 Requires at least: 6.3.0
-Requires PHP: 7.4.0
-Tested up to: 6.8.1
-Stable tag: 1.5.5
+Requires PHP: 7.0
+Tested up to: 6.9
+Stable tag: 1.7.5
 License: MIT License
 License URI: http://opensource.org/licenses/MIT
 
-Post Views Counter allows you to display how many times a post, page or custom post type had been viewed in a simple, fast and reliable way.
+Post Views Counter allows you to collect and display how many times a post, page, or other content has been viewed in a simple, fast and reliable way.
 
 == Description ==
 
-[Post Views Counter](https://postviewscounter.com/) allows you to display how many times a post, page or custom post type had been viewed with this simple, fast and easy to use plugin.
+Post Views Counter allows you to collect and display how many times a post, page, or other content has been viewed in a simple, fast and reliable way.
 
-= Features include: =
+[Post Views Counter](https://postviewscounter.com/) gives you clear, accurate post view stats — right inside WordPress. No external tools. No bloat. Just the numbers you need to see what’s working.
 
-* Option to select post types for which post views will be counted and displayed.
-* 3 methods of collecting post views data: PHP, Javascript and REST API for greater flexibility
-* Compatible with data privacy regulations
-* Possibility to manually set views count for each post
-* Dashboard post views stats widget
-* Full Privacy regulations compliance
-* Capability to query posts according to its views count
-* Custom REST API endpoints
-* Option to set counts interval
-* Excluding counts from visitors: bots, logged in users, selected user roles
-* Excluding users by IPs
-* Restricting display by user roles
-* Restricting post views editing to admins
-* One-click data import from WP-PostViews
-* Sortable admin column
-* Post views display position, automatic or manual via shortcode
-* Multisite compatibile
-* WPML and Polylang compatible
-* .pot file for translations included
+= Key Benefits =
+
+Clarity, speed, and control:
+
+- **Clear, Focused Metrics** — You get a clear picture of how your posts are performing.
+- **Made for WordPress** — Runs entirely in your site. No GA, no third-party pipes; accurate counts in your Dashboard.
+- **Privacy-first** — Data lives on your server, with controls that respect visitors’ rights and privacy regulations.
+- **Works at scale** — Minimal overhead, no external scripts, Multisite-ready.
+- **Display anywhere** — Automatically show counts, or place them exactly where you want via blocks or shortcode.
+
+= Features =
+
+Practical features that matter:
+
+- Count & display views for **any post type** you select.
+- Three counting modes: **PHP, JavaScript, REST API**
+- Dashboard post views **stats widget**
+- Sortable Post Views **admin column**
+- Exclude bots, logged-in users, specific roles, or IPs
+- Manually adjust a post’s views when needed.
+- Query and **order content by views** (developer-friendly)
+- Custom REST API endpoints
+- Option to set count interval
+- One-click data import from **WP-PostViews**, **Statify** and **Page Views Count**
+- Post views **display position**, automatic or manual via shortcode
+- **Multisite** compatibile
+- **WPML/Polylang** compatible; translation-ready (.pot)
+
+= Post Views Counter Pro =
+
+More capability without extra complexity:
+
+- **Fast AJAX counting** for more accurate data.
+- **Caching optimization** that guarantees performance even under heavy traffic.
+- **Reports**: Views by Date, Post, Author to spot winners, trends, and top contributors.
+- Customizable **Views Period** (e.g., last 7/30 days) to control the views count timeframe.
+- **Export to CSV/XML** to download and share data.
+- **Integrations** for ordering by views in popular builders (e.g., **Elementor Pro, Divi, GenerateBlocks**).
+
+[Learn more about Pro →](https://postviewscounter.com/pricing/)
 
 == Installation ==
 
@@ -44,7 +65,25 @@ Post Views Counter allows you to display how many times a post, page or custom p
 
 == Frequently Asked Questions ==
 
-No questions yet.
+For many frequently asked questions check the [Post Views Counter Docs](https://postviewscounter.com/documentation/).
+
+= Why use Post Views Counter vs Google Analytics? =
+
+Post Views Counter gives you clean, per-post view counts inside WordPress — fast, cache-friendly, and privacy-first, with data that stays on your server. Google Analytics might be an overkill when you just need accurate post/page views for editorial decisions.
+
+= Can I use Post Views Counter alongside Google Analytics? =
+
+Of course — many sites use both. Post Views Counter handles on-site, per-post view counts inside WordPress (no third-party scripts), while Google Analytics covers marketing funnels and acquisition.
+
+= Is Post Views Counter GDPR compliant? =
+
+Post Views Counter runs entirely inside WordPress with no third-party scripts and keeps data on your server — aligning with GDPR-style expectations.
+
+= How do I get support? =
+
+If you’re using the free version, please post your question in the WordPress.org support forum.
+
+If you’ve purchased Post Views Counter Pro, your license includes one year of updates and premium support. You can contact us directly through our dedicated support channel available after logging into your account at [Post Views Counter](https://postviewscounter.com/), and our team will get back to you.
 
 == Screenshots ==
 
@@ -52,6 +91,78 @@ No questions yet.
 2. screenshot-2.png
 
 == Changelog ==
+
+= 1.7.5 =
+* Tweak: Optimize traffic signals database query performance.
+* Tweak: Admin columns display priority and traffic signals comparison alignment.
+
+= 1.7.4 =
+* New: Month-over-Month anomaly detection traffic signals in admin columns.
+* Tweak: Add loading state UI to modal charts.
+* Fix: Month period rollover calculation in chart navigation.
+* Fix: Cookie validation for empty or malformed segments in frontend.
+
+= 1.7.3 =
+* Fix: Settings validation for exclude/restrict display checkbox fields.
+* Fix: Map nested array format to flat field keys before validation.
+* Fix: Restrict display merge logic using correct field names.
+
+= 1.7.2 =
+* Fix: jQuery wrapper applied to vanilla JS files in build output.
+
+= 1.7.1 =
+* New: Enhanced settings UI with modern theme and improved visual design.
+* Tweak: Improved settings field conditional visibility and validation.
+* Tweak: Better taxonomy display controls and IP exclusion field descriptions.
+* Fix: JS redeclaration errors by wrapping editor bundles in IIFE.
+* Fix: Conditional visibility for nested import settings fields.
+
+= 1.7.0 =
+* New: Integrations page with user-controlled handling for third-party plugins.
+* New (Pro): Beaver Builder integration for ordering posts by views in modules.
+* New (Pro): Improved JetEngine integration copy and settings UI.
+* Tweak: Refactored settings into modular page classes with backward compatibility.
+* Fix: Editor JS scope collisions by wrapping editor bundles in IIFE.
+
+= 1.6.1 =
+* Tweak: Switch to Vite build system for improved development workflow.
+* Fix (Pro): Fixed empty user agent handling in Fast AJAX mode.
+* Tweak: Additional UI improvements for settings pages.
+
+= 1.6.0 =
+* New: Dedicated import framework with provider-aware analysis/reporting and strategy selector.
+* New: Option to import views from Statify and Page Views Count plugins.
+* New (Pro): Additional import strategies (skip existing, keep higher count, fill empty-only).
+* New: Plugin Status panel now surfaces detected PVC database tables for easier troubleshooting.
+* Tweak: Settings UI reorganized with refreshed copy, clearer visitor exclusion controls, and a polished Other tab experience.
+* Tweak: Menu placement option moved to Display settings and mirrored for backward compatibility.
+
+= 1.5.9 =
+* New: Admin column modal chart with post views data
+* New: Extended admin column modal with yearly and weekly views data (Pro)
+* New: Admin column modal chart for terms and users (Pro)
+
+= 1.5.8 =
+* Tweak: Updated default value for object cache flushing interval
+* Tweak: Treat empty or missing user agent as bot
+
+= 1.5.7 =
+* New: Count visits by referrer (Pro)
+* Prevent duplicate AJAX calls in REST API mode
+* Fix: Major improvements for FastAjax handling (Pro)
+* Fix: Major object cache support improvements (Pro)
+* Fix: Apply crawler/bot check filter for REST API endpoints
+* Tweak: Remove unused storage and mutator methods
+
+= 1.5.6 =
+* New: Count visits by device, browser and OS (Pro)
+* New: Count visits by browser language (Pro)
+* New: Traffic Information dashboard widget (Pro)
+* New: HTTP request improvements for caching and security (Pro)
+* New: Client size bot detection (Pro)
+* Tweak: Fix and simplify post views shortcode for loops
+* Tweak: Adjust the post views display in Gutenberg editor
+* Tweak: Check db query results and log error
 
 = 1.5.5 =
 * New: Count Time option to store the views in GMT or Local time (Pro)
@@ -338,5 +449,5 @@ Initial release
 
 == Upgrade Notice ==
 
-= 1.5.5 =
-Count Time option, Author Posts and Author Archive in Reports (Pro) and improved logic for Admin Display and Admin Edit
+= 1.7.5 =
+Optimizes traffic signals database performance and tweaks admin columns display.

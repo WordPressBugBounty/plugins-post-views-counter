@@ -37,6 +37,7 @@ class Post_Views_Counter_Frontend {
 	 * Post views shortcode function.
 	 *
 	 * @param array $args
+	 *
 	 * @return string
 	 */
 	public function post_views_shortcode( $args ) {
@@ -47,34 +48,14 @@ class Post_Views_Counter_Frontend {
 			'type'	=> 'post'
 		];
 
-		// main item?
-		if ( ! in_the_loop() ) {
-			// get current object
-			$object = get_queried_object();
-
-			// post?
-			if ( is_a( $object, 'WP_Post' ) ) {
-				$defaults['id'] = $object->ID;
-				$defaults['type'] = 'post';
-			// term?
-			} elseif ( is_a( $object, 'WP_Term' ) ) {
-				$defaults['id'] = $object->term_id;
-				$defaults['type'] = 'term';
-			// user?
-			} elseif ( is_a( $object, 'WP_User' ) ) {
-				$defaults['id'] = $object->ID;
-				$defaults['type'] = 'user';
-			}
-		}
-
 		// combine attributes
-		$args = shortcode_atts( $defaults, $args );
+		$atts = apply_filters( 'pvc_post_views_shortcode_atts', shortcode_atts( $defaults, $args ) );
 
 		// default type?
-		if ( $args['type'] === 'post' )
-			$views = pvc_post_views( $args['id'], false );
+		if ( $atts['type'] === 'post' )
+			$views = function_exists( 'pvc_post_views' ) ? pvc_post_views( $atts['id'], false ) : 0;
 
-		return apply_filters( 'pvc_post_views_shortcode', $views, $args );
+		return apply_filters( 'pvc_post_views_shortcode', $views, $atts );
 	}
 
 	/**
@@ -221,7 +202,7 @@ class Post_Views_Counter_Frontend {
 			wp_enqueue_style( 'dashicons' );
 
 			// load style
-			wp_enqueue_style( 'post-views-counter-frontend', POST_VIEWS_COUNTER_URL . '/css/frontend' . ( ! ( defined( 'SCRIPT_DEBUG' ) && SCRIPT_DEBUG ) ? '.min' : '' ) . '.css', [], $pvc->defaults['version'] );
+			wp_enqueue_style( 'post-views-counter-frontend', POST_VIEWS_COUNTER_URL . '/css/frontend.css', [], $pvc->defaults['version'] );
 		}
 
 		// skip special requests
@@ -247,7 +228,7 @@ class Post_Views_Counter_Frontend {
 
 		// specific counter mode?
 		if ( in_array( $mode, [ 'js', 'rest_api' ], true ) ) {
-			wp_enqueue_script( 'post-views-counter-frontend', POST_VIEWS_COUNTER_URL . '/js/frontend' . ( ! ( defined( 'SCRIPT_DEBUG' ) && SCRIPT_DEBUG ) ? '.min' : '' ) . '.js', [], $pvc->defaults['version'], false );
+			wp_enqueue_script( 'post-views-counter-frontend', POST_VIEWS_COUNTER_URL . '/js/frontend.js', [], $pvc->defaults['version'], false );
 
 			// prepare args
 			$args = [

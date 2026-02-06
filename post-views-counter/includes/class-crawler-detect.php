@@ -152,7 +152,16 @@ class Post_Views_Counter_Crawler_Detect {
 	 * @return string
 	 */
 	public function get_regex( $crawlers = [] ) {
-		return '(' . implode( '|', empty( $crawlers ) ? $this->crawlers : $crawlers ) . ')';
+		$list = empty( $crawlers ) ? $this->crawlers : $crawlers;
+		
+		// Allow to intercept the regex
+		$regex = apply_filters( 'pvc_get_crawler_regex', null, $list );
+		
+		if ( $regex !== null ) {
+			return $regex;
+		}
+		
+		return '(' . implode( '|', $list ) . ')';
 	}
 
 	/**
@@ -161,6 +170,13 @@ class Post_Views_Counter_Crawler_Detect {
 	 * @return string
 	 */
 	public function get_exclusions() {
+		// Allow to intercept the exclusions regex
+		$regex = apply_filters( 'pvc_get_exclusions_regex', null, $this->exclusions );
+		
+		if ( $regex !== null ) {
+			return $regex;
+		}
+		
 		return '(' . implode( '|', $this->exclusions ) . ')';
 	}
 
@@ -175,10 +191,15 @@ class Post_Views_Counter_Crawler_Detect {
 		$crawlers = apply_filters( 'pvc_crawlers_list', $this->crawlers );
 
 		$agent = (string)( is_null( $user_agent ) ? $this->user_agent : $user_agent );
+		
+		// Treat empty or missing user agent as bot (security measure)
+		if ( strlen( trim( $agent ) ) === 0 )
+			return true;
+		
 		$agent = preg_replace( '/' . $this->get_exclusions() . '/i', '', $agent );
 
 		if ( strlen( trim( $agent ) ) === 0 )
-			return false;
+			return true;
 		else
 			$result = preg_match( '/' . $this->get_regex( $crawlers ) . '/i', trim( $agent ), $matches );
 

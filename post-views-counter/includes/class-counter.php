@@ -12,9 +12,6 @@ class Post_Views_Counter_Counter {
 
 	private $storage = [];
 	private $storage_type = 'cookies';
-	/* COUNT_POST_AS_AUTHOR_VIEW | removed property
-	private $storage_modified = false;
-	*/
 	private $queue = [];
 	private $queue_mode = false;
 	private $db_insert_values = '';
@@ -37,88 +34,10 @@ class Post_Views_Counter_Counter {
 	}
 
 	/**
-	 * Get storage data.
-	 *
-	 * @return array
-	 */
-	public function get_storage() {
-		return $this->storage;
-	}
-
-	/**
-	 * Set storage data. Used only for additional authors counting.
-	 *
-	 * @return bool
-	 */
-	/* COUNT_POST_AS_AUTHOR_VIEW | removed function
-	public function set_storage( $data, $class ) {
-		if ( ! is_a( $class, 'Post_Views_Counter_Pro_Counter' ) )
-			return false;
-
-		if ( ! $class->is_main_storage_allowed() )
-			return false;
-
-		// is it active content type?
-		if ( ! $class->is_content_type_active( 'user', 'posts' ) )
-			return false;
-
-		if ( $this->storage_type === 'cookies' )
-			$this->storage = $data;
-		else
-			$this->storage['user'] = $data;
-
-		$this->storage_modified = true;
-
-		return true;
-	}
-	*/
-
-	/**
-	 * Get storage type.
-	 *
-	 * @return array
-	 */
-	public function get_storage_type() {
-		return $this->storage_type;
-	}
-
-	/**
-	 * Set storage type. Used only for fast ajax requests.
-	 *
-	 * @param string $storage_type
-	 * @return array
-	 */
-	public function set_storage_type( $storage_type, $class ) {
-		// allow only from pro counter class
-		if ( ! is_a( $class, 'Post_Views_Counter_Pro_Counter' ) )
-			return false;
-
-		// allow only fast ajax requests
-		if ( ! ( defined( 'SHORTINIT' ) && SHORTINIT ) )
-			return false;
-
-		// check post data
-		if ( ! isset( $_POST['action'], $_POST['content'], $_POST['type'], $_POST['subtype'], $_POST['storage_type'], $_POST['storage_data'], $_POST['pvcp_nonce'] ) )
-			return false;
-
-		// verify nonce
-		if ( ! wp_verify_nonce( $_POST['pvcp_nonce'], 'pvcp-check-post' ) )
-			return false;
-
-		// allow only valid storage type
-		if ( in_array( $storage_type, [ 'cookies', 'cookieless' ], true ) ) {
-			$this->storage_type = $storage_type;
-
-			return true;
-		}
-
-		return false;
-	}
-
-	/**
 	 * Add Post ID to queue.
 	 *
 	 * @param int $post_id
+	 *
 	 * @return void
 	 */
 	public function add_to_queue( $post_id ) {
@@ -172,6 +91,13 @@ class Post_Views_Counter_Counter {
 	 * @return void
 	 */
 	public function print_queue_count() {
+		// get main instance
+		$pvc = Post_Views_Counter();
+
+		// only load manual counter for js mode, not for rest_api mode
+		if ( $pvc->options['general']['counter_mode'] !== 'js' )
+			return;
+
 		// any ids to "view"?
 		if ( ! empty( $this->queue ) ) {
 			echo "
@@ -208,7 +134,7 @@ class Post_Views_Counter_Counter {
 							}
 						}
 
-						pvcLoadManualCounter( '" . POST_VIEWS_COUNTER_URL . "/js/counter" . ( ! ( defined( 'SCRIPT_DEBUG' ) && SCRIPT_DEBUG ) ? '.min' : '' ) . ".js', pvcExecuteManualCounter );
+						pvcLoadManualCounter( '" . POST_VIEWS_COUNTER_URL . "/js/counter.js', pvcExecuteManualCounter );
 					}, false );
 				} )( window, document );
 			</script>";
@@ -251,7 +177,8 @@ class Post_Views_Counter_Counter {
 	 *
 	 * @param int $post_id
 	 * @param array $content_data
-	 * @return void|int
+	 *
+	 * @return null|int
 	 */
 	public function check_post( $post_id = 0, $content_data = [] ) {
 		// force check cookie in short init mode
@@ -263,7 +190,7 @@ class Post_Views_Counter_Counter {
 
 		// empty id?
 		if ( empty( $post_id ) )
-			return;
+			return null;
 
 		// get main instance
 		$pvc = Post_Views_Counter();
@@ -285,7 +212,7 @@ class Post_Views_Counter_Counter {
 
 		// conditions failed?
 		if ( ! $conditions_met )
-			return;
+			return null;
 
 		// do not count visit by default
 		$count_visit = false;
@@ -328,6 +255,7 @@ class Post_Views_Counter_Counter {
 	 * @param string $user_ip
 	 * @param string $content_type
 	 * @param array $content_data
+	 *
 	 * @return bool
 	 */
 	public function check_conditions( $allow_counting, $post_id, $user_id, $user_ip, $content_type, $content_data ) {
@@ -381,6 +309,7 @@ class Post_Views_Counter_Counter {
 	 * Check whether real home page is displayed.
 	 *
 	 * @param object $object
+	 *
 	 * @return bool
 	 */
 	public function is_homepage( $object ) {
@@ -416,6 +345,7 @@ class Post_Views_Counter_Counter {
 	 * Check whether posts page (archive) is displayed.
 	 *
 	 * @param object $object
+	 *
 	 * @return bool
 	 */
 	public function is_posts_page( $object ) {
@@ -539,7 +469,8 @@ class Post_Views_Counter_Counter {
 	 * Check whether to count visit via REST API request.
 	 *
 	 * @param object $request
-	 * @return int|WP_Error
+	 *
+	 * @return object|array
 	 */
 	public function check_post_rest_api( $request ) {
 		// get main instance
@@ -573,6 +504,19 @@ class Post_Views_Counter_Counter {
 		if ( ! in_array( $storage_type, [ 'cookies', 'cookieless' ], true ) )
 			return new WP_Error( 'pvc_invalid_storage_type', __( 'Invalid storage type.', 'post-views-counter' ), [ 'status' => 404 ] );
 
+		// apply crawler/bot check filter
+		$allowed = apply_filters( 'pvc_rest_api_count_post_check', true, $request, $post_id );
+
+		if ( ! $allowed ) {
+			return new WP_REST_Response( [
+				'post_id'	=> $post_id,
+				'counted'	=> false,
+				'reason'	=> 'filtered',
+				'storage'	=> [],
+				'type'		=> 'post'
+			], 200 );
+		}
+
 		// set storage type
 		$this->storage_type = $storage_type;
 
@@ -596,9 +540,10 @@ class Post_Views_Counter_Counter {
 	}
 
 	/**
-	 * Initialize cookie session.
+	 * Initialize cookie session. Use $cookie to force custom data instead of real $_COOKIE.
 	 *
-	 * @param array $cookie Use this data instead of real $_COOKIE
+	 * @param array $cookie
+	 *
 	 * @return void
 	 */
 	public function check_cookie( $cookie = [] ) {
@@ -647,6 +592,7 @@ class Post_Views_Counter_Counter {
 	 * Sanitize storage data.
 	 *
 	 * @param string $storage_data
+	 *
 	 * @return array
 	 */
 	public function sanitize_storage_data( $storage_data ) {
@@ -675,6 +621,7 @@ class Post_Views_Counter_Counter {
 	 * Sanitize cookies.
 	 *
 	 * @param string $storage_data
+	 *
 	 * @return array
 	 */
 	public function sanitize_cookies_data( $storage_data ) {
@@ -705,6 +652,7 @@ class Post_Views_Counter_Counter {
 	 * @param int $content
 	 * @param string $content_type
 	 * @param array $content_data
+	 *
 	 * @return bool
 	 */
 	private function save_data_storage( $content, $content_type, $content_data ) {
@@ -756,6 +704,7 @@ class Post_Views_Counter_Counter {
 	 *
 	 * @param int $content
 	 * @param array $content_data
+	 *
 	 * @return bool
 	 */
 	private function save_cookie_storage( $content, $content_data ) {
@@ -855,16 +804,6 @@ class Post_Views_Counter_Counter {
 			}
 		}
 
-		/* COUNT_POST_AS_AUTHOR_VIEW | removed additional data
-		if ( $this->storage_modified && ! empty( $this->storage ) ) {
-			foreach ( $this->storage as $key => $value ) {
-				foreach ( $value as $subkey => $subvalue ) {
-					$cookies_data[$key][] = $subvalue;
-				}
-			}
-		}
-		*/
-
 		$this->storage = $cookies_data;
 
 		return $count_visit;
@@ -875,7 +814,8 @@ class Post_Views_Counter_Counter {
 	 *
 	 * @param int $id
 	 * @param array $cookie
-	 * @return bool
+	 *
+	 * @return bool|void
 	 */
 	private function save_cookie( $id, $cookie = [] ) {
 		// early return?
@@ -1013,40 +953,66 @@ class Post_Views_Counter_Counter {
 	/**
 	 * Count visit.
 	 *
-	 * @param int $id
-	 * @return int
+	 * @param int $post_id
+	 *
+	 * @return int|null
 	 */
-	private function count_visit( $id ) {
-		// get main instance
-		$pvc = Post_Views_Counter();
-		
+	private function count_visit( $post_id ) {
 		// increment amount
-		$increment_amount = (int) apply_filters( 'pvc_views_increment_amount', 1, $id, 'post' );
+		$increment_amount = (int) apply_filters( 'pvc_views_increment_amount', 1, $post_id, 'post' );
 
 		if ( $increment_amount < 1 )
 			$increment_amount = 1;
-		
-		$use_gmt = $pvc->options['general']['count_time'] === 'local' ? false : true;
-		$count_time = current_time( 'timestamp', $use_gmt );
 
 		// get day, week, month and year
-		$date = explode( '-', date( 'W-d-m-Y-o', $count_time ) );
+		$date = explode( '-', date( 'W-d-m-Y-o', current_time( 'timestamp', Post_Views_Counter()->options['general']['count_time'] === 'gmt' ) ) );
 
-		foreach ( [
-			0 => $date[3] . $date[2] . $date[1],	// day like 20140324
-			1 => $date[4] . $date[0],				// week like 201439
-			2 => $date[3] . $date[2],				// month like 201405
-			3 => $date[3],							// year like 2014
-			4 => 'total'							// total views
-		] as $type => $period ) {
-//TODO investigate queueing these queries on the 'shutdown' hook instead of running them instantly?
-			// hit the database directly
-			$this->db_insert( $id, $type, $period, $increment_amount );
+		// prepare count data
+		$count_data = [
+			'content_id'	=> $post_id,
+			'content_type'	=> 'post',
+			'increment'		=> $increment_amount,
+			'visits'		=> [
+				0 => $date[3] . $date[2] . $date[1], // day like 20140324
+				1 => $date[4] . $date[0],			 // week like 201439
+				2 => $date[3] . $date[2],			 // month like 201405
+				3 => $date[3],						 // year like 2014
+				4 => 'total'						 // total views
+			]
+		];
+
+		// attempt to count the visit and check for success
+		if ( call_user_func( apply_filters( 'pvc_count_visit_multi', [ $this, 'count_visit_multi' ] ), $count_data ) ) {
+			do_action( 'pvc_after_count_visit', $post_id, 'post' );
+
+			return $post_id;
 		}
 
-		do_action( 'pvc_after_count_visit', $id, 'post' );
+		// return null on failure to indicate the count did not succeed
+		return null;
+	}
 
-		return $id;
+	/**
+	 * Prepare values to be inserted into database.
+	 *
+	 * @param array $data
+	 *
+	 * @return bool
+	 */
+	public function count_visit_multi( $data ) {
+		// no count data?
+		if ( empty( $data ) )
+			return false;
+
+		$success = true;
+
+		foreach ( $data['visits'] as $type => $period ) {
+			// hit the database directly and check for failure
+			if ( ! $this->db_insert( $data['content_id'], $type, $period, $data['increment'] ) )
+				$success = false;
+		}
+
+		return $success;
 	}
 
 	/**
@@ -1055,6 +1021,7 @@ class Post_Views_Counter_Counter {
 	 * @global object $wpdb
 	 *
 	 * @param int $post_id
+	 *
 	 * @return void
 	 */
 	public function delete_post_views( $post_id ) {
@@ -1076,6 +1043,7 @@ class Post_Views_Counter_Counter {
 	 * @param string $type
 	 * @param int $number
 	 * @param bool $timestamp
+	 *
 	 * @return int
 	 */
 	public function get_timestamp( $type, $number, $timestamp = true ) {
@@ -1095,6 +1063,7 @@ class Post_Views_Counter_Counter {
 	 * Check if object cache is in use.
 	 *
 	 * @param bool $only_interval
+	 *
 	 * @return bool
 	 */
 	public function using_object_cache( $only_interval = false ) {
@@ -1172,19 +1141,26 @@ class Post_Views_Counter_Counter {
 	 * @param int $type
 	 * @param string $period
 	 * @param int $count
-	 * @return int|bool
+	 *
+	 * @return bool
 	 */
 	private function db_insert( $id, $type, $period, $count ) {
-		// check whether skip single query
-		$skip_single_query = (bool) apply_filters( 'pvc_skip_single_query', false, $id, $type, $period, $count, 'post' );
-
-		// skip query?
-		if ( $skip_single_query )
-			return false;
-
 		global $wpdb;
 
-		return $wpdb->query( $wpdb->prepare( "INSERT INTO " . $wpdb->prefix . "post_views (id, type, period, count) VALUES (%d, %d, %s, %d) ON DUPLICATE KEY UPDATE count = count + %d", $id, $type, $period, $count, $count ) );
+		// skip single query?
+		if ( (bool) apply_filters( 'pvc_skip_single_query', false, $id, $type, $period, $count, 'post' ) )
+			return true; // consider skipped as "successful" for this context
+
+		$result = $wpdb->query( $wpdb->prepare( 'INSERT INTO ' . $wpdb->prefix . 'post_views (`id`, `type`, `period`, `count`) VALUES (%d, %d, %s, %d) ON DUPLICATE KEY UPDATE count = count + %d', $id, $type, $period, $count, $count ) );
+
+		// check for query failure
+		if ( $result === false ) {
+			// log the error for debugging
+			error_log( sprintf( 'Post Views Counter: Failed to insert/update views for ID %d, type %d, period %s. MySQL error: %s', $id, $type, $period, $wpdb->last_error ) );
+			return false;
+		}
+
+		return true;
 	}
 
 	/**
@@ -1194,6 +1170,7 @@ class Post_Views_Counter_Counter {
 	 * @param int $type
 	 * @param string $period
 	 * @param int $count
+	 *
 	 * @return void
 	 */
 	private function db_prepare_insert( $id, $type, $period, $count = 1 ) {
@@ -1222,10 +1199,10 @@ class Post_Views_Counter_Counter {
 	 * @return int|bool
 	 */
 	private function db_commit_insert() {
+		global $wpdb;
+
 		if ( empty( $this->db_insert_values ) )
 			return false;
-
-		global $wpdb;
 
 		$result = $wpdb->query(
 			"INSERT INTO " . $wpdb->prefix . "post_views (id, type, period, count)
@@ -1242,7 +1219,8 @@ class Post_Views_Counter_Counter {
 	 * Check whether user has excluded roles.
 	 *
 	 * @param int $user_id
-	 * @param string $option
+	 * @param array $option
+	 *
 	 * @return bool
 	 */
 	public function is_user_role_excluded( $user_id, $option = [] ) {
@@ -1270,8 +1248,9 @@ class Post_Views_Counter_Counter {
 	/**
 	 * Check if IPv4 is in range.
 	 *
-	 * @param string $ip IP address
-	 * @param string $range IP range
+	 * @param string $ip
+	 * @param string $range
+	 *
 	 * @return bool
 	 */
 	public function ipv4_in_range( $ip, $range ) {
@@ -1309,7 +1288,8 @@ class Post_Views_Counter_Counter {
 	/**
 	 * Ensure an IP address is both a valid IP and does not fall within a private network range.
 	 *
-	 * @param $ip string IP address
+	 * @param string $ip
+	 *
 	 * @return bool
 	 */
 	public function validate_user_ip( $ip ) {
@@ -1370,6 +1350,7 @@ class Post_Views_Counter_Counter {
 	 * Get post views via REST API request.
 	 *
 	 * @param object $request
+	 *
 	 * @return int
 	 */
 	public function get_post_views_rest_api( $request ) {
@@ -1380,6 +1361,7 @@ class Post_Views_Counter_Counter {
 	 * Check if a given request has access to get views.
 	 *
 	 * @param object $request
+	 *
 	 * @return bool
 	 */
 	public function get_post_views_permissions_check( $request ) {
@@ -1390,6 +1372,7 @@ class Post_Views_Counter_Counter {
 	 * Check if a given request has access to view post.
 	 *
 	 * @param object $request
+	 *
 	 * @return bool
 	 */
 	public function view_post_permissions_check( $request ) {
@@ -1399,7 +1382,8 @@ class Post_Views_Counter_Counter {
 	/**
 	 * Validate REST API incoming data.
 	 *
-	 * @param int|array $data
+	 * @param int|array|string $data
+	 *
 	 * @return int|array
 	 */
 	public function validate_rest_api_data( $data ) {

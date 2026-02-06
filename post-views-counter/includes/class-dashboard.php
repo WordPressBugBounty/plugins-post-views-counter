@@ -58,7 +58,7 @@ class Post_Views_Counter_Dashboard {
 	 */
 	public function wp_dashboard_setup() {
 		// add dashboard widget
-		wp_add_dashboard_widget( 'pvc_dashboard', __( 'Post Views Counter', 'post-views-counter' ), [ $this, 'dashboard_widget' ] );
+		wp_add_dashboard_widget( 'pvc_dashboard', __( 'Post Views', 'post-views-counter' ), [ $this, 'dashboard_widget' ] );
 	}
 
 	/**
@@ -71,7 +71,7 @@ class Post_Views_Counter_Dashboard {
 		$pvc = Post_Views_Counter();
 
 		// styles
-		wp_enqueue_style( 'pvc-admin-dashboard', POST_VIEWS_COUNTER_URL . '/css/admin-dashboard.min.css', [], $pvc->defaults['version'] );
+		wp_enqueue_style( 'pvc-admin-dashboard', POST_VIEWS_COUNTER_URL . '/css/admin-dashboard.css', [], $pvc->defaults['version'] );
 		wp_enqueue_style( 'pvc-microtip', POST_VIEWS_COUNTER_URL . '/assets/microtip/microtip.min.css', [], '1.0.0' );
 
 		// scripts
@@ -83,6 +83,8 @@ class Post_Views_Counter_Dashboard {
 			'nonce'		=> wp_create_nonce( 'pvc-dashboard-widget' ),
 			'nonceUser'	=> wp_create_nonce( 'pvc-dashboard-user-options' )
 		];
+
+		$script_data = apply_filters( 'pvc_admin_dashboard_script_data', $script_data );
 
 		wp_add_inline_script( 'pvc-admin-dashboard', 'var pvcArgs = ' . wp_json_encode( $script_data ) . ";\n", 'before' );
 	}
@@ -127,6 +129,11 @@ class Post_Views_Counter_Dashboard {
 
 		// set widget items
 		$this->widget_items = $items;
+	}
+
+	public function get_widget_items() {
+		// return widget items
+		return $this->widget_items;	
 	}
 
 	/**
@@ -187,7 +194,7 @@ class Post_Views_Counter_Dashboard {
 	 *
 	 * @param array $item
 	 * @param array $menu_items
-	 * @param string $dates_html
+	 *
 	 * @return string
 	 */
 	public function generate_dashboard_widget_item( $item, $menu_items ) {
@@ -197,7 +204,6 @@ class Post_Views_Counter_Dashboard {
 			'id' => [],
 			'height' => []
 		];
-
 
 		ob_start(); ?>
 
@@ -218,7 +224,7 @@ class Post_Views_Counter_Dashboard {
 						<?php echo wp_kses( $item['content'], $allowed_html ); ?>
 						<span class="spinner"></span>
 					</div>
-					<div class="pvc-dashboard-content-bottom pvc-date-nav">
+					<div class="pvc-dashboard-content-bottom">
 						<div class="pvc-date-nav pvc-months">
 							<?php 
 							// generate dates
@@ -658,5 +664,4 @@ class Post_Views_Counter_Dashboard {
 	public function period2timestamp( $period ) {
 		return pvc_period2timestamp( $period );
 	}
-
 }

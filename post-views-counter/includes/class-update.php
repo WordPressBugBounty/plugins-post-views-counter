@@ -141,6 +141,35 @@ class Post_Views_Counter_Update {
 			$pvc->options['display'] = $display;
 		}
 
+		// update 1.6.0+ - migrate import settings to provider format
+		if ( version_compare( $current_db_version, '1.6.0', '<' ) ) {
+			// get other options
+			$other = $pvc->options['other'];
+
+			// check if migration is needed
+			if ( ! isset( $other['import_provider_settings'] ) && isset( $other['import_meta_key'] ) ) {
+				$old_meta_key = $other['import_meta_key'];
+
+				// create new provider settings structure
+				$other['import_provider_settings'] = [
+					'provider' => 'custom_meta_key',
+					'strategy' => 'merge',
+					'custom_meta_key' => [
+						'meta_key' => $old_meta_key
+					]
+				];
+
+				// update settings
+				update_option( 'post_views_counter_settings_other', $other );
+
+				// update options
+				$pvc->options['other'] = $other;
+			}
+		}
+
+		// move menu position setting to display tab
+		$this->migrate_menu_position_option();
+
 		if ( isset( $_POST['post_view_counter_update'], $_POST['post_view_counter_number'] ) ) {
 			if ( $_POST['post_view_counter_number'] === 'update_1' ) {
 				$this->update_1();
@@ -168,6 +197,11 @@ class Post_Views_Counter_Update {
 			} else
 				// update plugin version
 				update_option( 'post_views_counter_version', $pvc->defaults['version'], false );
+		}
+
+		// ensure integrations option exists
+		if ( ! get_option( 'post_views_counter_settings_integrations' ) ) {
+			add_option( 'post_views_counter_settings_integrations', $pvc->defaults['integrations'], null, false );
 		}
 	}
 
@@ -200,5 +234,41 @@ class Post_Views_Counter_Update {
 		}
 
 		Post_Views_Counter()->add_notice( __( 'Thank you! Datebase was successfully updated.', 'post-views-counter' ), 'updated', true );
+	}
+
+	/**
+	 * Move menu position setting from "Other" to "Display" settings.
+	 *
+	 * @return void
+	 */
+	private function migrate_menu_position_option() {
+		$pvc = Post_Views_Counter();
+
+		// prefer legacy value if present, otherwise fall back to current display option
+		$menu_position = isset( $pvc->options['other']['menu_position'] ) && in_array( $pvc->options['other']['menu_position'], [ 'top', 'sub' ], true )
+			? $pvc->options['other']['menu_position']
+			: ( isset( $pvc->options['display']['menu_position'] ) && in_array( $pvc->options['display']['menu_position'], [ 'top', 'sub' ], true )
+				? $pvc->options['display']['menu_position']
+				: 'top' );
+
+		$display_options = get_option( 'post_views_counter_settings_display', [] );
+
+		if ( ! isset( $display_options['menu_position'] ) || ! in_array( $display_options['menu_position'], [ 'top', 'sub' ], true ) ) {
+			$display_options['menu_position'] = $menu_position;
+			update_option( 'post_views_counter_settings_display', $display_options );
+		}
+
+		$other_options = get_option( 'post_views_counter_settings_other', [] );
+
+		if ( ! is_array( $other_options ) )
+			$other_options = [];
+
+		if ( ! isset( $other_options['menu_position'] ) || ! in_array( $other_options['menu_position'], [ 'top', 'sub' ], true ) ) {
+			$other_options['menu_position'] = $display_options['menu_position'];
+			update_option( 'post_views_counter_settings_other', $other_options );
+		}
+
+		$pvc->options['other']['menu_position'] = $other_options['menu_position'];
+		$pvc->options['display']['menu_position'] = $display_options['menu_position'];
 	}
 }

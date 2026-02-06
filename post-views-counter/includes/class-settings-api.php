@@ -18,10 +18,10 @@ class Post_Views_Counter_Settings_API {
 	private $prefix = '';
 	private $slug = '';
 	private $domain = '';
-	private $short = '';
 	private $plugin = '';
 	private $plugin_url = '';
 	private $object;
+	private $nested = false;
 
 	/**
 	 * Class constructor.
@@ -32,28 +32,13 @@ class Post_Views_Counter_Settings_API {
 		// set initial data
 		$this->prefix = $args['prefix'];
 		$this->domain = $args['domain'];
+		$this->nested = isset( $args['nested'] ) ? (bool) $args['nested'] : false;
 
 		// empty slug?
 		if ( empty( $args['slug'] ) )
 			$this->slug = $args['domain'];
 		else
 			$this->slug = $args['slug'];
-
-		// empty short name?
-		if ( empty( $args['short'] ) ) {
-			$short = '';
-
-			// prepare short name based on prefix
-			$parts = explode( '_', $this->prefix );
-
-			foreach ( $parts as $string ) {
-				$short .= substr( $string, 0, 1 );
-			}
-
-			// set short name
-			$this->short = $short;
-		} else
-			$this->short = $args['short'];
 
 		$this->object = $args['object'];
 		$this->plugin = $args['plugin'];
@@ -116,13 +101,11 @@ class Post_Views_Counter_Settings_API {
 	 * @return void
 	 */
 	public function admin_enqueue_scripts() {
-		$handler = $this->short . '-settings-api-style';
-
-		// register and enqueue styles
+		// Legacy inline styles for disabled tabs
+		$handler = $this->prefix . '-settings-api-style';
 		wp_register_style( $handler, false );
 		wp_enqueue_style( $handler );
 
-		// add styles
 		wp_add_inline_style( $handler, '.nav-tab-wrapper span.nav-span-disabled {
 			cursor: not-allowed;
 			float: left;
@@ -202,13 +185,6 @@ class Post_Views_Counter_Settings_API {
 			$url_page = 'admin.php';
 		}
 
-		// display sub level settings page?
-		if ( ! $valid_page && $pagenow === 'admin.php' && preg_match( '/^(?:toplevel|' . $this->prefix . ')_page_' . $this->prefix . '-(' . implode( '|', $this->page_types['subpage'] ) . ')-settings$/', $screen->base, $matches ) === 1 && ! empty( $matches[1] ) ) {
-			$valid_page = true;
-			$page_type = 'subpage';
-			$url_page = 'admin.php';
-		}
-
 		// display settings page?
 		if ( ! $valid_page && $pagenow === 'options-general.php' && preg_match( '/^(?:settings_page_)(' . implode( '|', array_keys( $this->page_types['settings_page'] ) ) . ')$/', $screen->base, $matches ) === 1 ) {
 			$valid_page = true;
@@ -220,16 +196,14 @@ class Post_Views_Counter_Settings_API {
 		if ( ! $valid_page )
 			return;
 
-		echo '
-		<div class="wrap">
-			<h2>' . esc_html( $this->settings[$matches[1]]['label'] ) . '</h2>';
-
+		$page_key = $this->page_types[$page_type][$matches[1]];
 		$tab_key = '';
+		$tabs = [];
 
 		// any tabs?
-		if ( array_key_exists( 'tabs', $this->pages[$this->page_types[$page_type][$matches[1]]] ) ) {
+		if ( array_key_exists( 'tabs', $this->pages[$page_key] ) ) {
 			// get tabs
-			$tabs = $this->pages[$this->page_types[$page_type][$matches[1]]]['tabs'];
+			$tabs = $this->pages[$page_key]['tabs'];
 
 			// reset tabs
 			reset( $tabs );
@@ -248,8 +222,25 @@ class Post_Views_Counter_Settings_API {
 			if ( ! array_key_exists( $tab_key, $tabs ) )
 				$tab_key = $first_tab;
 
+			$tab_label = ! empty( $tabs[$tab_key]['label'] ) ? $tabs[$tab_key]['label'] : '';
+			$tab_heading = ! empty( $tabs[$tab_key]['heading'] ) ? $tabs[$tab_key]['heading'] : '';
+		} else
+			$tab_label = '';
+
+		if ( empty( $tabs ) )
+			$tab_heading = '';
+
+		$heading = $this->plugin;
+
+		echo '
+		<div class="wrap ' . $this->prefix . '-settings-wrapper' . '" data-settings-prefix="' . esc_attr( $this->prefix ) . '">
+			<div class="header-wrapper">
+				<span class="header-title">' . esc_html( $heading ) . '</span>
+			</div>';
+
+		if ( ! empty( $tabs ) ) {
 			echo '
-			<h2 class="nav-tab-wrapper">';
+			<nav class="nav-tab-wrapper">';
 
 			foreach ( $tabs as $key => $tab ) {
 				if ( ! empty( $tab['disabled'] ) )
@@ -268,18 +259,43 @@ class Post_Views_Counter_Settings_API {
 			}
 
 			echo '
-			</h2>';
+			</nav>';
 		}
+
+		echo '
+			<div class="content-wrapper">
+			<h1 class="screen-reader-text">' . esc_html( $heading ) . '</h1>';
 
 		// skip for internal options page
 		if ( $page_type !== 'settings_page' )
 			settings_errors();
 
 		// get settings page classes
-		$settings_class = apply_filters( $this->prefix . '_settings_page_class', [ $this->slug . '-settings', $tab_key . '-settings' ] );
+		$settings_class = apply_filters( $this->prefix . '_settings_page_class', [ $this->slug . '-settings', $tab_key . '-settings', $this->prefix . '-settings' ] );
 
 		// sanitize settings page classes
 		$settings_class = array_unique( array_filter( array_map( 'sanitize_html_class', $settings_class ) ) );
+
+		// resolve setting group for sidebar/form
+		if ( ! empty( $tab_key ) ) {
+			if ( ! empty( $tabs[$tab_key]['option_name'] ) ) {
+				$setting = $tabs[$tab_key]['option_name'];
+			} else {
+				$setting = $this->prefix . '_' . $tab_key . '_settings';
+			}
+		} else {
+			$setting = $this->prefix . '_' . $matches[1] . '_settings';
+		}
+
+		// capture sidebar output
+		ob_start();
+		do_action( $this->prefix . '_settings_sidebar', $setting, $page_type, $url_page, $tab_key );
+		$sidebar_html = trim( ob_get_clean() );
+
+		// add has-sidebar class if sidebar has content
+		if ( ! empty( $sidebar_html ) ) {
+			$settings_class[] = 'has-sidebar';
+		}
 
 		echo '
 			<div class="' . implode( ' ', array_map( 'esc_attr', $settings_class ) ) . '">';
@@ -287,53 +303,86 @@ class Post_Views_Counter_Settings_API {
 		$display_form = true;
 
 		// check form attribute
-		if ( ! empty( $this->settings[$matches[1]]['form'] ) && ! empty( $tab_key ) && ! empty( $this->settings[$matches[1]]['form'][$tab_key] ) ) {
+		if ( ! empty( $tab_key ) && ! empty( $tabs[$tab_key]['form'] ) ) {
+			$form = $tabs[$tab_key]['form'];
+
+			if ( isset( $form['buttons'] ) && ! $form['buttons'] )
+				$display_form = false;
+		} elseif ( ! empty( $tab_key ) && isset( $this->settings[$matches[1]]['form'][$tab_key] ) ) {
 			$form = $this->settings[$matches[1]]['form'][$tab_key];
+
+			if ( isset( $form['buttons'] ) && ! $form['buttons'] )
+				$display_form = false;
+		} elseif ( isset( $this->settings[$matches[1]]['form'] ) ) {
+			$form = $this->settings[$matches[1]]['form'];
 
 			if ( isset( $form['buttons'] ) && ! $form['buttons'] )
 				$display_form = false;
 		}
 
-		// any tabs?
-		if ( ! empty( $tab_key ) ) {
-			if ( ! empty( $tabs[$tab_key]['option_name'] ) )
-				$setting = $tabs[$tab_key]['option_name'];
-			else
-				$setting = $this->prefix . '_' . $tab_key . '_settings';
-		} else
-			$setting = $this->prefix . '_' . $matches[1] . '_settings';
-
-		do_action( $this->short . '_settings_sidebar', $setting, $page_type, $url_page, $tab_key );
-
 		if ( $display_form ) {
 			echo '
-				<form action="options.php" method="post">';
+				<form action="options.php" method="post" novalidate class="' . $this->prefix . '-settings-form">';
 		}
 
 		settings_fields( $setting );
 
 		if ( $display_form )
-			do_action( $this->short . '_settings_form', $setting, $page_type, $url_page, $tab_key );
+			do_action( $this->prefix . '_settings_form', $setting, $page_type, $url_page, $tab_key );
+
+		// filter sections by tab if tabs are present
+		global $wp_settings_sections;
+
+		$original_sections = $wp_settings_sections;
+
+		if ( ! empty( $tab_key ) && isset( $this->settings[$page_key]['sections'] ) ) {
+			$filtered_sections = [];
+
+			foreach ( $this->settings[$page_key]['sections'] as $section_id => $section ) {
+				// include sections without tab or matching current tab
+				if ( empty( $section['tab'] ) || $section['tab'] === $tab_key ) {
+					if ( isset( $wp_settings_sections[$setting][$section_id] ) ) {
+						$filtered_sections[$section_id] = $wp_settings_sections[$setting][$section_id];
+					}
+				}
+			}
+
+			// replace with filtered sections
+			if ( isset( $wp_settings_sections[$setting] ) ) {
+				$wp_settings_sections[$setting] = $filtered_sections;
+			}
+		}
 
 		do_settings_sections( $setting );
 
+		// restore original sections
+		$wp_settings_sections = $original_sections;
+
 		if ( $display_form ) {
+			$setting_hyphenated = str_replace( '_', '-', $setting );
 			echo '
 					<p class="submit">';
 
-			submit_button( '', 'primary', 'save_' . $setting, false );
+			submit_button( '', 'primary save-' . $setting_hyphenated, 'save_' . $setting, false, [ 'id' => 'save-' . $setting_hyphenated ] );
 
-			echo ' ';
-
-			submit_button( __( 'Reset to defaults', $this->domain ), 'secondary reset_' . $setting . ' reset_' . $this->short . '_settings', 'reset_' . $setting, false );
+			submit_button( __( 'Reset to defaults', $this->domain ), 'outline reset-' . $setting_hyphenated, 'reset_' . $setting, false, [ 'id' => 'reset-' . $setting_hyphenated ] );
 
 			echo '
 					</p>
 				</form>';
 		}
 
+		// output sidebar if it has content
+		if ( ! empty( $sidebar_html ) ) {
+			echo '
+			<div class="' . $this->prefix . '-sidebar">' . $sidebar_html . '</div>';
+		}
+
 		echo '
 			</div>
+			</div>';
+
+		echo '
 			<div class="clear"></div>
 		</div>';
 	}
@@ -377,11 +426,23 @@ class Post_Views_Counter_Settings_API {
 				if ( ! empty( $section['tab'] ) && $section['tab'] !== $setting_id )
 					continue;
 
+				// Auto-generate section classes and wrapper
+				$base_slug = sanitize_html_class( str_replace( '_', '-', $section_id ) );
+				$section_prefix = apply_filters( $this->prefix . '_settings_section_prefix', $this->prefix );
+				$section_prefix = sanitize_html_class( $section_prefix );
+				$section_classes = $section_prefix . '-section ' . $section_prefix . '-section-' . $base_slug;
+				$section_args = [
+					'section_class' => $section_classes,
+					'before_section' => '<section id="' . $section_prefix . '-section-' . $base_slug . '" class="%s">',
+					'after_section' => '</section>',
+				];
+
 				add_settings_section(
 					$section_id,
 					! empty( $section['title'] ) ? esc_html( $section['title'] ) : '',
 					! empty( $section['callback'] ) ? $section['callback'] : null,
-					! empty( $section['page'] ) ? $section['page'] : $option_name
+					! empty( $section['page'] ) ? $section['page'] : $option_name,
+					$section_args
 				);
 			}
 		}
@@ -400,13 +461,40 @@ class Post_Views_Counter_Settings_API {
 				if ( ! empty( $field['skip_rendering'] ) )
 					continue;
 
+				// prepare field args
+				$args = array_merge( $this->prepare_field_args( $field, $field_id, $field_key, $setting_id, $option_name ), $field );
+				$args['setting_id'] = $setting_id;
+				$class = sanitize_html_class( str_replace( '_', '-', $field_id ) );
+				$classes = [ $class ];
+
+				if ( ! empty( $args['class'] ) ) {
+					$extra_classes = preg_split( '/\s+/', trim( $args['class'] ) );
+					$extra_classes = array_filter( $extra_classes );
+					$extra_classes = array_map( 'sanitize_html_class', $extra_classes );
+					$classes = array_merge( $classes, $extra_classes );
+				}
+
+				$classes = array_values( array_unique( array_filter( $classes ) ) );
+
+				$field_class = implode( ' ', $classes );
+				$wrapper_class = $class !== '' ? $class . '-row' : '';
+
+				// preserve user classes in wrapper
+				if ( ! empty( $field['class'] ) ) {
+					$wrapper_class .= ' ' . $field['class'];
+				}
+
+				$args['class'] = $wrapper_class;
+				$args['field_class'] = $field_class;
+				$args['css_id'] = $class;
+
 				add_settings_field(
 					$field_id,
 					! empty( $field['title'] ) ? esc_html( $field['title'] ) : '',
 					[ $this, 'render_field' ],
 					$option_name,
 					! empty( $field['section'] ) ? esc_attr( $field['section'] ) : '',
-					array_merge( $this->prepare_field_args( $field, $field_id, $field_key, $setting_id, $option_name ), $field )
+					$args
 				);
 			}
 		}
@@ -422,22 +510,82 @@ class Post_Views_Counter_Settings_API {
 		// get field type
 		$field_type = ! empty( $field['type'] ) ? $field['type'] : '';
 
+		// default lookup path
+		$value = null;
+		$default = null;
+		$name = $setting_name . '[' . $field_key . ']';
+
+		// check for parent
+		if ( ! empty( $field['parent'] ) ) {
+			$name = $setting_name . '[' . $field['parent'] . '][' . $field_key . ']';
+
+			// try with setting_id first
+			if ( isset( $this->object->options[$setting_id][$field['parent']][$field_key] ) ) {
+				$value = $this->object->options[$setting_id][$field['parent']][$field_key];
+			} elseif ( isset( $this->object->options[$field['parent']][$field_key] ) ) {
+				// try without setting_id
+				$value = $this->object->options[$field['parent']][$field_key];
+			}
+
+			// defaults
+			if ( isset( $this->object->defaults[$setting_id][$field['parent']][$field_key] ) ) {
+				$default = $this->object->defaults[$setting_id][$field['parent']][$field_key];
+			} elseif ( isset( $this->object->defaults[$field['parent']][$field_key] ) ) {
+				$default = $this->object->defaults[$field['parent']][$field_key];
+			}
+		} else {
+			// nested?
+			if ( $this->nested ) {
+				$name = $setting_name . '[' . $setting_id . '][' . $field_key . ']';
+
+				if ( isset( $this->object->options[$setting_id][$field_key] ) )
+					$value = $this->object->options[$setting_id][$field_key];
+
+				if ( isset( $this->object->defaults[$setting_id][$field_key] ) )
+					$default = $this->object->defaults[$setting_id][$field_key];
+			} else {
+				// flat
+				if ( isset( $this->object->options[$setting_id][$field_key] ) ) {
+					$value = $this->object->options[$setting_id][$field_key];
+				} elseif ( isset( $this->object->options[$field_key] ) ) {
+					$value = $this->object->options[$field_key];
+				}
+
+				// defaults
+				if ( isset( $this->object->defaults[$setting_id][$field_key] ) ) {
+					$default = $this->object->defaults[$setting_id][$field_key];
+				} elseif ( isset( $this->object->defaults[$field_key] ) ) {
+					$default = $this->object->defaults[$field_key];
+				}
+			}
+		}
+
+		if ( $field_type === 'custom' ) {
+			$value = null;
+			$default = null;
+		}
+
 		return [
-			'id'			=> $field_id,
-			'name'			=> $setting_name . '[' . $field_key . ']',
-			'class'			=> ! empty( $field['class'] ) ? $field['class'] : '',
-			'type'			=> $field_type,
-			'label'			=> ! empty( $field['label'] ) ? $field['label'] : '',
-			'description'	=> ! empty( $field['description'] ) ? $field['description'] : '',
-			'text'			=> ! empty( $field['text'] ) ? $field['text'] : '',
-			'min'			=> ! empty( $field['min'] ) ? (int) $field['min'] : 0,
-			'max'			=> ! empty( $field['max'] ) ? (int) $field['max'] : 0,
-			'options'		=> ! empty( $field['options'] ) ? $field['options'] : [],
-			'callback'		=> ! empty( $field['callback'] ) ? $field['callback'] : null,
-			'validate'		=> ! empty( $field['validate'] ) ? $field['validate'] : null,
-			'callback_args'	=> ! empty( $field['callback_args'] ) ? $field['callback_args'] : [],
-			'default'		=> $field_type !== 'custom' ? $this->object->defaults[$setting_id][$field_key] : null,
-			'value'			=> $field_type !== 'custom' ? $this->object->options[$setting_id][$field_key] : null
+			'id'				=> $field_id,
+			'html_id'			=> sanitize_html_class( str_replace( '_', '-', $field_id ) ),
+			'name'				=> $name,
+			'class'				=> ! empty( $field['class'] ) ? $field['class'] : '',
+			'type'				=> $field_type,
+			'label'				=> ! empty( $field['label'] ) ? $field['label'] : '',
+			'description'		=> ! empty( $field['description'] ) ? $field['description'] : '',
+			'text'				=> ! empty( $field['text'] ) ? $field['text'] : '',
+			'min'				=> ! empty( $field['min'] ) ? (int) $field['min'] : 0,
+			'max'				=> ! empty( $field['max'] ) ? (int) $field['max'] : 0,
+			'options'			=> ! empty( $field['options'] ) ? $field['options'] : [],
+			'callback'			=> ! empty( $field['callback'] ) ? $field['callback'] : null,
+			'validate'			=> ! empty( $field['validate'] ) ? $field['validate'] : null,
+			'callback_args'		=> ! empty( $field['callback_args'] ) ? $field['callback_args'] : [],
+			'default'			=> $default,
+			'value'				=> $value,
+			'setting_id'		=> $setting_id,
+			'animation'			=> ! empty( $field['animation'] ) ? $field['animation'] : '',
+			'logic'				=> ! empty( $field['logic'] ) ? $field['logic'] : null,
+			'fallback_option'	=> ! empty( $field['fallback_option'] ) ? sanitize_key( $field['fallback_option'] ) : ''
 			/*
 			after_field
 			before_field
@@ -455,7 +603,73 @@ class Post_Views_Counter_Settings_API {
 		if ( empty( $args ) || ! is_array( $args ) )
 			return;
 
-		$html = '<div id="' . esc_attr( $args['id'] ) . '_setting"' . ( ! empty( $args['class'] ) ? ' class="' . esc_attr( $args['class'] ) . '"' : '' ) . '>';
+		// build wrapper classes
+		$wrapper_classes = [ $this->prefix . '-field', $this->prefix . '-field-type-' . $args['type'] ];
+		if ( ! empty( $args['class'] ) )
+			$wrapper_classes[] = $args['class'];
+
+		// add disabled class if field is disabled (but not if feature is available)
+		if ( ! empty( $args['disabled'] ) && $args['disabled'] === true && empty( $args['available'] ) )
+			$wrapper_classes[] = $this->prefix . '-disabled';
+
+		// build wrapper attributes
+		$wrapper_attrs = ' id="' . esc_attr( str_replace( '_', '-', $args['id'] ) ) . '-setting" class="' . esc_attr( implode( ' ', $wrapper_classes ) ) . '"';
+
+		// add conditional data attributes
+		$data_attrs = '';
+		$conditions = [];
+		$fallback_option = ! empty( $args['fallback_option'] ) ? $args['fallback_option'] : '';
+
+		if ( ! empty( $args['logic'] ) && is_array( $args['logic'] ) ) {
+			if ( isset( $args['logic']['field'] ) ) {
+				$conditions = [ $args['logic'] ];
+			} else {
+				$conditions = $args['logic'];
+			}
+		}
+
+		if ( ! empty( $conditions ) ) {
+			$data_attr_prefix = sanitize_html_class( $this->prefix );
+			$normalized_conditions = [];
+
+			foreach ( $conditions as $condition ) {
+				if ( empty( $condition['field'] ) || empty( $condition['operator'] ) ) {
+					continue;
+				}
+
+				$field = $condition['field'];
+
+				if ( strpos( $field, '-' ) === false && ! empty( $args['setting_id'] ) ) {
+					$field_id = implode( '_', [ $this->prefix, $args['setting_id'], $field ] );
+					$field = sanitize_html_class( str_replace( '_', '-', $field_id ) );
+				}
+
+				$normalized_conditions[] = [
+					'field'		=> $field,
+					'operator'	=> $condition['operator'],
+					'value'		=> isset( $condition['value'] ) ? $condition['value'] : '',
+					'scope'		=> ! empty( $condition['scope'] ) ? sanitize_key( $condition['scope'] ) : '',
+					'action'	=> ! empty( $condition['action'] ) ? sanitize_key( $condition['action'] ) : '',
+					'target'	=> ! empty( $condition['target'] ) ? sanitize_text_field( $condition['target'] ) : '',
+					'container'	=> ! empty( $condition['container'] ) ? sanitize_text_field( $condition['container'] ) : '',
+				];
+			}
+
+			if ( ! empty( $normalized_conditions ) && $data_attr_prefix !== '' ) {
+				if ( ! empty( $args['animation'] ) && in_array( $args['animation'], [ 'fade', 'slide' ], true ) ) {
+					$data_attrs .= ' data-' . $data_attr_prefix . '-animation="' . esc_attr( $args['animation'] ) . '"';
+				}
+				$data_attrs .= ' data-' . $data_attr_prefix . '-logic="' . esc_attr( wp_json_encode( $normalized_conditions ) ) . '"';
+			}
+		}
+
+		if ( $fallback_option !== '' ) {
+			$data_attrs .= ' data-' . $this->prefix . '-fallback-option="' . esc_attr( $fallback_option ) . '"';
+		}
+
+		$wrapper_attrs .= $data_attrs;
+
+		$html = '<div' . $wrapper_attrs . '>';
 
 		if ( ! empty ( $args['before_field'] ) )
 			$html .= $args['before_field'];
@@ -465,13 +679,37 @@ class Post_Views_Counter_Settings_API {
 				if ( empty( $args['disabled'] ) )
 					$html .= '<input type="hidden" name="' . esc_attr( $args['name'] ) . '" value="false" />';
 
-				$html .= '<label><input id="' . esc_attr( $args['id'] ) . '" type="checkbox" name="' . esc_attr( $args['name'] ) . '" value="true" ' . checked( (bool) $args['value'], true, false ) . ' ' . disabled( empty( $args['disabled'] ), false, false ) . ' />' . esc_html( $args['label'] ) . '</label>';
+				$html .= '<label><input id="' . esc_attr( $args['html_id'] ) . '" type="checkbox" role="switch" name="' . esc_attr( $args['name'] ) . '" value="true" ' . checked( (bool) $args['value'], true, false ) . ' ' . disabled( empty( $args['disabled'] ), false, false ) . ' />' . wp_kses_post( $args['label'] ) . '</label>';
 				break;
 
 			case 'radio':
+				if ( empty( $args['options'] ) || ! is_array( $args['options'] ) )
+					break;
+
+				$display_type = ! empty( $args['display_type'] ) && in_array( $args['display_type'], [ 'horizontal', 'vertical' ], true ) ? $args['display_type'] : 'vertical';
+
+				if ( count( $args['options'] ) > 1 )
+					$html .= '<div class="' . esc_attr( $this->prefix ) . '-field-group ' . esc_attr( $this->prefix ) . '-radio-group ' . $display_type . '">';
 				foreach ( $args['options'] as $key => $name ) {
-					$html .= '<label for="' . esc_attr( $args['id'] . '_' . $key ) . '"><input id="' . esc_attr( $args['id'] . '_' . $key ) . '" type="radio" name="' . esc_attr( $args['name'] ) . '" value="' . esc_attr( $key ) . '" ' . checked( $key, $args['value'], false ) . ' ' . disabled( ! empty( $args['disabled'] ) && in_array ( $key, $args['disabled'], true ), true, false ) . ' />' . esc_html( $name ) . '</label> ';
+					$is_disabled = ! empty( $args['disabled'] ) && ( is_array( $args['disabled'] ) && in_array( $key, $args['disabled'], true ) || $args['disabled'] === true );
+					$label_classes = [];
+
+					if ( $is_disabled && is_array( $args['disabled'] ) )
+						$label_classes[] = $this->prefix . '-disabled';
+					
+					// add PRO class for disabled options in pro-extended fields
+					if ( $is_disabled && ! empty( $args['class'] ) && strpos( $args['class'], 'pvc-pro-extended' ) !== false ) {
+						$label_classes[] = $this->prefix . '-pro';
+					}
+					
+					$label_class = ! empty( $label_classes ) ? ' class="' . implode( ' ', $label_classes ) . '"' : '';
+					
+					$display_name = esc_html( $name );
+					
+					$html .= '<label for="' . esc_attr( $args['html_id'] . '-' . $key ) . '"' . $label_class . '><input id="' . esc_attr( $args['html_id'] . '-' . $key ) . '" type="radio" name="' . esc_attr( $args['name'] ) . '" value="' . esc_attr( $key ) . '" ' . checked( $key, $args['value'], false ) . ' ' . disabled( $is_disabled, true, false ) . ' />' . $display_name . '</label> ';
 				}
+				if ( count( $args['options'] ) > 1 )
+					$html .= '</div>';
 				break;
 
 			case 'checkbox':
@@ -479,17 +717,41 @@ class Post_Views_Counter_Settings_API {
 				if ( $args['value'] === 'empty' )
 					$args['value'] = [];
 
-				$display_type = ! empty( $args['display_type'] ) && in_array( $args['display_type'], [ 'horizontal', 'vertical' ], true ) ? $args['display_type'] : 'horizontal';
+				// ensure value is an array
+				if ( ! is_array( $args['value'] ) )
+					$args['value'] = [];
+
+				$display_type = ! empty( $args['display_type'] ) && in_array( $args['display_type'], [ 'horizontal', 'vertical' ], true ) ? $args['display_type'] : 'vertical';
 
 				$html .= '<input type="hidden" name="' . esc_attr( $args['name'] ) . '" value="empty" />';
 
+				if ( empty( $args['options'] ) || ! is_array( $args['options'] ) )
+					break;
+				if ( count( $args['options'] ) > 1 )
+					$html .= '<div class="' . esc_attr( $this->prefix ) . '-field-group ' . esc_attr( $this->prefix ) . '-checkbox-group ' . $display_type . '">';
 				foreach ( $args['options'] as $key => $name ) {
-					$html .= '<label><input id="' . esc_attr( $args['id'] . '_' . $key ) . '" type="checkbox" name="' . esc_attr( $args['name'] ) . '[]" value="' . esc_attr( $key ) . '" ' . checked( in_array( $key, $args['value'] ), true, false ) . ' ' . disabled( ! empty( $args['disabled'] ) && in_array ( $key, $args['disabled'], true ), true, false ) . ' />' . esc_html( $name ) . '</label>' . ( $display_type === 'horizontal' ? ' ' : '<br />' );
+					$is_disabled = ! empty( $args['disabled'] ) && ( is_array( $args['disabled'] ) && in_array( $key, $args['disabled'], true ) || $args['disabled'] === true );
+					$label_classes = [];
+
+					if ( $is_disabled && is_array( $args['disabled'] ) )
+						$label_classes[] = $this->prefix . '-disabled';
+
+					// add PRO styling for disabled options in pro-extended fields
+					if ( $is_disabled && ! empty( $args['class'] ) && strpos( $args['class'], 'pvc-pro-extended' ) !== false )
+						$label_classes[] = $this->prefix . '-pro';
+
+					$label_class = ! empty( $label_classes ) ? ' class="' . implode( ' ', $label_classes ) . '"' : '';
+
+					$display_name = esc_html( $name );
+
+					$html .= '<label' . $label_class . '><input id="' . esc_attr( $args['html_id'] . '-' . $key ) . '" type="checkbox" name="' . esc_attr( $args['name'] ) . '[]" value="' . esc_attr( $key ) . '" ' . checked( in_array( $key, $args['value'] ), true, false ) . ' ' . disabled( $is_disabled, true, false ) . ' />' . $display_name . '</label>';
 				}
+				if ( count( $args['options'] ) > 1 )
+					$html .= '</div>';
 				break;
 
 			case 'select':
-				$html .= '<select id="' . esc_attr( $args['id'] ) . '" name="' . esc_attr( $args['name'] ) . '" ' . disabled( empty( $args['disabled'] ), false, false ) . '/>';
+				$html .= '<select id="' . esc_attr( $args['html_id'] ) . '" name="' . esc_attr( $args['name'] ) . '" ' . disabled( empty( $args['disabled'] ), false, false ) . '/>';
 
 				foreach ( $args['options'] as $key => $name ) {
 					$html .= '<option value="' . esc_attr( $key ) . '" ' . selected( $args['value'], $key, false ) . '>' . esc_html( $name ) . '</option>';
@@ -499,13 +761,35 @@ class Post_Views_Counter_Settings_API {
 				break;
 
 			case 'range':
-				$html .= '<input id="' . esc_attr( $args['id'] . '_slider' ) . '" type="range" name="' . esc_attr( $args['name'] ) . '" value="' . esc_attr( $args['value'] ) . '" min="' . esc_attr( $args['min'] ) . '" max="' . esc_attr( $args['max'] ) . '" oninput="this.form.' . esc_attr( $args['id'] ) . '_range.value = this.value" /><output class="' . esc_attr( $this->slug ) . '-range" name="' . esc_attr( $args['id'] ) . '_range">' . ( (int) $args['value'] ) . '</output>';
+				$html .= '<input id="' . esc_attr( $args['html_id'] ) . '-slider" type="range" name="' . esc_attr( $args['name'] ) . '" value="' . esc_attr( $args['value'] ) . '" min="' . esc_attr( $args['min'] ) . '" max="' . esc_attr( $args['max'] ) . '" data-range-output="' . esc_attr( $args['html_id'] ) . '-output" /><output id="' . esc_attr( $args['html_id'] ) . '-output" class="' . esc_attr( $this->slug ) . '-range">' . ( (int) $args['value'] ) . '</output>';
 				break;
 
 			case 'number':
 				$html .= ( ! empty( $args['prepend'] ) ? wp_kses_post( $args['prepend'] ) : '' );
-				$html .= '<input id="' . $args['id'] . '" type="text" value="' . esc_attr( $args['value'] ) . '" name="' . esc_attr( $args['name'] ) . '" />';
+				$html .= '<input id="' . esc_attr( $args['html_id'] ) . '" type="text" value="' . esc_attr( $args['value'] ) . '" name="' . esc_attr( $args['name'] ) . '" />';
 				$html .= ( ! empty( $args['append'] ) ? wp_kses_post( $args['append'] ) : '' );
+				break;
+
+			case 'color':
+				$color_value = esc_attr( $args['value'] );
+				$color_name = esc_attr( $args['name'] );
+				$input_id = esc_attr( $args['html_id'] );
+				$input_class = $this->prefix . '-color-input';
+
+				if ( ! empty( $args['subclass'] ) ) {
+					$input_class .= ' ' . esc_attr( $args['subclass'] );
+				}
+
+				$swatch_style = ' style="background-color: ' . $color_value . ';"';
+
+				$html .= '<div class="' . $this->prefix . '-color-control">';
+				// Text input for the hex color value.
+				$html .= '<input id="' . $input_id . '" type="text" name="' . $color_name . '" value="' . $color_value . '" class="' . $input_class . '" />';
+				// Swatch button to toggle the picker.
+				$html .= '<button type="button" class="' . $this->prefix . '-color-swatch"' . $swatch_style . ' aria-label="' . esc_attr__( 'Open color picker', $this->domain ) . '" aria-expanded="false"></button>';
+				// Vanilla-colorful picker (hidden by default).
+				$html .= '<div class="' . $this->prefix . '-color-popover" aria-hidden="true"><hex-color-picker class="' . $this->prefix . '-hex-color-picker" color="' . $color_value . '"></hex-color-picker></div>';
+				$html .= '</div>';
 				break;
 
 			case 'custom':
@@ -522,7 +806,7 @@ class Post_Views_Counter_Settings_API {
 				$empty_disabled = empty( $args['disabled'] );
 
 				$html .= ( ! empty( $args['prepend'] ) ? wp_kses_post( $args['prepend'] ) : '' );
-				$html .= '<input id="' . $args['id'] . '"' . ( ! empty( $args['subclass'] ) ? ' class="' . esc_attr( $args['subclass'] ) . '"' : '' ) . ' type="text" value="' . esc_attr( $args['value'] ) . '" name="' . esc_attr( $args['name'] ) . '" ' . disabled( $empty_disabled, false, false ) . '/>';
+				$html .= '<input id="' . esc_attr( $args['html_id'] ) . '"' . ( ! empty( $args['subclass'] ) ? ' class="' . esc_attr( $args['subclass'] ) . '"' : '' ) . ' type="text" value="' . esc_attr( $args['value'] ) . '" name="' . esc_attr( $args['name'] ) . '" ' . disabled( $empty_disabled, false, false ) . '/>';
 				$html .= ( ! empty( $args['append'] ) ? wp_kses_post( $args['append'] ) : '' );
 
 				if ( ! $empty_disabled )
@@ -599,6 +883,13 @@ class Post_Views_Counter_Settings_API {
 				// is value greater than?
 				if ( isset( $args['max'] ) && $value > $args['max'] )
 					$value = $args['max'];
+				break;
+
+			case 'color':
+				$value = sanitize_text_field( $value );
+				if ( ! preg_match( '/^#[a-f0-9]{3,6}$/i', $value ) ) {
+					$value = $args['default'] ?? '#000000';
+				}
 				break;
 
 			case 'info':
@@ -723,7 +1014,7 @@ class Post_Views_Counter_Settings_API {
 			add_settings_error( $setting_name, 'settings_restored', __( 'Settings restored to defaults.', $this->domain ), 'updated' );
 		}
 
-		do_action( $this->short . '_configuration_updated', 'settings', $input );
+		do_action( $this->prefix . '_configuration_updated', 'settings', $input );
 
 		return $input;
 	}
