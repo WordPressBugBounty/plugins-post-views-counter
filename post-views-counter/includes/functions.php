@@ -54,8 +54,6 @@ if ( ! function_exists( 'pvc_get_post_views' ) ) {
 		// override type if explicitly provided in args
 		if ( isset( $args['type'] ) ) {
 			$where['type'] = 'type = ' . (int) $args['type'];
-			if ( ! isset( $args['content'] ) )
-				$where['content'] = 'content = 0';
 		} elseif ( isset( $args['period_type'] ) ) {
 			$period_type = sanitize_key( $args['period_type'] );
 			$type_map = [
@@ -67,8 +65,6 @@ if ( ! function_exists( 'pvc_get_post_views' ) ) {
 			];
 			if ( isset( $type_map[ $period_type ] ) ) {
 				$where['type'] = 'type = ' . $type_map[ $period_type ];
-				if ( ! isset( $args['content'] ) )
-					$where['content'] = 'content = 0';
 			}
 		}
 
@@ -96,9 +92,12 @@ if ( ! function_exists( 'pvc_get_post_views' ) ) {
 			// default to day type when using explicit ranges and no type set
 			if ( ! isset( $where['type'] ) ) {
 				$where['type'] = 'type = 0';
-				if ( ! isset( $args['content'] ) )
-					$where['content'] = 'content = 0';
 			}
+		}
+
+		// handle explicit content parameter (for Pro plugin or custom implementations)
+		if ( isset( $args['content'] ) ) {
+			$where['content'] = 'content = ' . (int) $args['content'];
 		}
 
 		// update where clause
@@ -137,7 +136,7 @@ if ( ! function_exists( 'pvc_get_post_views' ) ) {
 			if ( $index === 'type' ) {
 				$where_clause .= ' type = %d';
 				$numbers[] = (int) $value;
-			} elseif ( $index === 'content' ) {
+			} elseif ( $index === 'content' && pvc_post_views_has_content_column() ) {
 				$where_clause .= ' AND content = %d';
 				$numbers[] = (int) $value;
 			} elseif ( $index === 'period' ) {
@@ -177,6 +176,31 @@ if ( ! function_exists( 'pvc_get_post_views' ) ) {
 
 		return (int) apply_filters( 'pvc_get_post_views', $post_views, $post_id, $period, $args );
 	}
+}
+
+/**
+ * Check if content column exists in post_views table.
+ *
+ * @global object $wpdb
+ *
+ * @return bool
+ */
+function pvc_post_views_has_content_column() {
+	global $wpdb;
+
+	static $has_content_column = null;
+
+	// check column existence only once
+	if ( $has_content_column === null ) {
+		// check content column using SHOW COLUMNS (more robust than information_schema)
+		$columns = $wpdb->get_col( "SHOW COLUMNS FROM " . $wpdb->prefix . "post_views LIKE 'content'" );
+
+		// cache result
+		$has_content_column = ! empty( $columns );
+	}
+
+	// always allow override via filter (applied on every call)
+	return apply_filters( 'pvc_post_views_has_content_column', $has_content_column );
 }
 
 /**

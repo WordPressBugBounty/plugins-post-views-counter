@@ -3,8 +3,8 @@ Contributors: dfactory
 Tags: counter, postviews, statistics, analytics, pageviews
 Requires at least: 6.3.0
 Requires PHP: 7.0
-Tested up to: 6.9
-Stable tag: 1.7.5
+Tested up to: 6.9.1
+Stable tag: 1.7.6
 License: MIT License
 License URI: http://opensource.org/licenses/MIT
 
@@ -91,6 +91,9 @@ If you’ve purchased Post Views Counter Pro, your license includes one year of 
 2. screenshot-2.png
 
 == Changelog ==
+
+= 1.7.6 =
+* Fix: Prevent SQL errors in pvc_get_post_views function.
 
 = 1.7.5 =
 * Tweak: Optimize traffic signals database query performance.
@@ -449,5 +452,5 @@ Initial release
 
 == Upgrade Notice ==
 
-= 1.7.5 =
-Optimizes traffic signals database performance and tweaks admin columns display.
+= 1.7.6 =
+Fix content column and prevent SQL errors in pvc_get_post_views function.
