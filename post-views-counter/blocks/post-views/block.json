@@ -7,7 +7,13 @@
 	"category": "post-views-counter",
 	"icon": "list-view",
 	"description": "Display post views for a given post.",
-	"example": {},
+	"keywords": [ "views", "counter", "analytics", "display" ],
+	"example": {
+		"attributes": {
+			"postID": 0,
+			"period": "total"
+		}
+	},
 	"attributes": {
 		"postID": {
 			"type": "integer",

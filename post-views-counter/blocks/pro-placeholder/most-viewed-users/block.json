@@ -1,0 +1,19 @@
+{
+	"$schema": "https://schemas.wp.org/trunk/block.json",
+	"apiVersion": 3,
+	"name": "post-views-counter/most-viewed-users",
+	"version": "1.0.0",
+	"title": "Most Viewed Authors",
+	"category": "post-views-counter",
+	"icon": "list-view",
+	"description": "Displays a list of the most viewed authors. Requires Post Views Counter Pro.",
+	"keywords": [ "views", "popular", "author", "user", "pro" ],
+	"attributes": {},
+	"supports": {
+		"html": false,
+		"multiple": false,
+		"reusable": false
+	},
+	"textdomain": "post-views-counter",
+	"editorScript": "file:../index.js"
+}

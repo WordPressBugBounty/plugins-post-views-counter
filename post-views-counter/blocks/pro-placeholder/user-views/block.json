@@ -1,0 +1,19 @@
+{
+	"$schema": "https://schemas.wp.org/trunk/block.json",
+	"apiVersion": 3,
+	"name": "post-views-counter/user-views",
+	"version": "1.0.0",
+	"title": "Author Views",
+	"category": "post-views-counter",
+	"icon": "list-view",
+	"description": "Display views for a given author. Requires Post Views Counter Pro.",
+	"keywords": [ "views", "user", "author", "profile", "pro" ],
+	"attributes": {},
+	"supports": {
+		"html": false,
+		"multiple": false,
+		"reusable": false
+	},
+	"textdomain": "post-views-counter",
+	"editorScript": "file:../index.js"
+}

@@ -1267,22 +1267,114 @@ class Post_Views_Counter_Counter {
 	 * @return string
 	 */
 	public function get_user_ip() {
-		$ip = isset( $_SERVER['REMOTE_ADDR'] ) ? $_SERVER['REMOTE_ADDR'] : '';
+		// Default strategy: respect only REMOTE_ADDR (most secure, backward compatible)
+		$strategy = apply_filters( 'pvc_ip_resolution_strategy', 'remote_addr' );
 
-		foreach ( [ 'HTTP_CLIENT_IP', 'HTTP_X_FORWARDED_FOR', 'HTTP_X_FORWARDED', 'HTTP_X_CLUSTER_CLIENT_IP', 'HTTP_FORWARDED_FOR', 'HTTP_FORWARDED', 'REMOTE_ADDR' ] as $key ) {
+		// Validate strategy - only allow known values to prevent silent weakening
+		$valid_strategies = [ 'remote_addr', 'trusted_proxy_only', 'auto' ];
+		if ( ! in_array( $strategy, $valid_strategies, true ) )
+			$strategy = 'remote_addr';
+
+		// Always get REMOTE_ADDR first (most reliable)
+		$remote_addr = isset( $_SERVER['REMOTE_ADDR'] ) ? $_SERVER['REMOTE_ADDR'] : '';
+		$remote_addr = $this->sanitize_ip( $remote_addr );
+
+		// If strategy is remote_addr only, return REMOTE_ADDR if valid
+		if ( $strategy === 'remote_addr' ) {
+			if ( $this->validate_user_ip( $remote_addr ) )
+				return $remote_addr;
+
+			return '';
+		}
+
+		// For other strategies, check if REMOTE_ADDR is a trusted proxy
+		$trusted_proxies = apply_filters( 'pvc_trusted_proxy_cidrs', [] );
+		$is_proxy_request = ! empty( $trusted_proxies ) && $this->is_ip_in_cidrs( $remote_addr, $trusted_proxies );
+
+		// If strategy is trusted_proxy_only, require REMOTE_ADDR to be trusted proxy
+		if ( $strategy === 'trusted_proxy_only' && ! $is_proxy_request )
+			return '';
+
+		// If strategy is 'auto' or unknown (shouldn't happen after validation), use forwarded headers if available
+		// Priority: check forwarded headers only if we have a valid base IP
+		$ip_headers = [ 'HTTP_X_FORWARDED_FOR', 'HTTP_CLIENT_IP', 'HTTP_X_FORWARDED', 'HTTP_X_CLUSTER_CLIENT_IP', 'HTTP_FORWARDED_FOR', 'HTTP_FORWARDED' ];
+
+		foreach ( $ip_headers as $key ) {
 			if ( array_key_exists( $key, $_SERVER ) === true ) {
-				foreach ( explode( ',', $_SERVER[$key] ) as $ip ) {
-					// trim for safety measures
-					$ip = trim( $ip );
+				$ips = explode( ',', $_SERVER[$key] );
 
-					// attempt to validate IP
-					if ( $this->validate_user_ip( $ip ) )
+				foreach ( $ips as $header_ip ) {
+					$header_ip = $this->sanitize_ip( trim( $header_ip ) );
+
+					// Skip if same as remote addr (prevent loops)
+					if ( $header_ip === $remote_addr )
 						continue;
+
+					// Validate the IP
+					if ( $this->validate_user_ip( $header_ip ) )
+						return $header_ip;
 				}
 			}
 		}
 
-		return (string) $ip;
+		// Fallback to REMOTE_ADDR if valid
+		if ( $this->validate_user_ip( $remote_addr ) )
+			return $remote_addr;
+
+		return '';
+	}
+
+	/**
+	 * Sanitize an IP address.
+	 *
+	 * @param string $ip
+	 *
+	 * @return string
+	 */
+	private function sanitize_ip( $ip ) {
+		return sanitize_text_field( wp_unslash( $ip ) );
+	}
+
+	/**
+	 * Check if IP matches any CIDR range.
+	 *
+	 * @param string $ip
+	 * @param array  $cidrs
+	 *
+	 * @return bool
+	 */
+	private function is_ip_in_cidrs( $ip, $cidrs ) {
+		if ( empty( $cidrs ) || ! is_array( $cidrs ) )
+			return false;
+
+		$ip_long = ip2long( $ip );
+		if ( $ip_long === false )
+			return false;
+
+		foreach ( $cidrs as $cidr ) {
+			$cidr = trim( $cidr );
+
+			if ( strpos( $cidr, '/' ) === false )
+				$cidr .= '/32';
+
+			list( $subnet, $mask ) = explode( '/', $cidr );
+
+			$subnet_long = ip2long( $subnet );
+			if ( $subnet_long === false )
+				continue;
+
+			$mask = (int) $mask;
+
+			// Validate mask range to prevent ArithmeticError
+			if ( $mask < 0 || $mask > 32 )
+				continue;
+
+			// Apply mask
+			if ( ( $ip_long & ~( ( 1 << ( 32 - $mask ) ) - 1 ) ) === ( $subnet_long & ~( ( 1 << ( 32 - $mask ) ) - 1 ) ) )
+				return true;
+		}
+
+		return false;
 	}
 
 	/**
@@ -1362,10 +1454,13 @@ class Post_Views_Counter_Counter {
 	 *
 	 * @param object $request
 	 *
-	 * @return bool
+	 * @return bool|\WP_Error
 	 */
 	public function get_post_views_permissions_check( $request ) {
-		return (bool) apply_filters( 'pvc_rest_api_get_post_views_check', true, $request );
+		// GET views is always public by default (read-only operation)
+		$default = true;
+
+		return (bool) apply_filters( 'pvc_rest_api_get_post_views_check', $default, $request );
 	}
 
 	/**
@@ -1373,10 +1468,25 @@ class Post_Views_Counter_Counter {
 	 *
 	 * @param object $request
 	 *
-	 * @return bool
+	 * @return bool|\WP_Error
 	 */
 	public function view_post_permissions_check( $request ) {
-		return (bool) apply_filters( 'pvc_rest_api_view_post_check', true, $request );
+		// Default: allow if REST API mode is enabled
+		$pvc = post_views_counter();
+		$default = isset( $pvc->options['general']['counter_mode'] ) && $pvc->options['general']['counter_mode'] === 'rest_api';
+
+		$result = (bool) apply_filters( 'pvc_rest_api_view_post_check', $default, $request );
+
+		// If filter denied access, return WP_Error for clearer feedback
+		if ( ! $result && $default ) {
+			return new \WP_Error(
+				'rest_not_allowed',
+				__( 'You do not have permission to count post views via REST API.', 'post-views-counter' ),
+				[ 'status' => 403 ]
+			);
+		}
+
+		return $result;
 	}
 
 	/**

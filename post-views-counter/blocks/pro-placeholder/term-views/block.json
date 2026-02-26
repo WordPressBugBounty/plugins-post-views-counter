@@ -1,0 +1,19 @@
+{
+	"$schema": "https://schemas.wp.org/trunk/block.json",
+	"apiVersion": 3,
+	"name": "post-views-counter/term-views",
+	"version": "1.0.0",
+	"title": "Term Views",
+	"category": "post-views-counter",
+	"icon": "list-view",
+	"description": "Display views for a given term. Requires Post Views Counter Pro.",
+	"keywords": [ "views", "term", "taxonomy", "category", "tag", "pro" ],
+	"attributes": {},
+	"supports": {
+		"html": false,
+		"multiple": false,
+		"reusable": false
+	},
+	"textdomain": "post-views-counter",
+	"editorScript": "file:../index.js"
+}

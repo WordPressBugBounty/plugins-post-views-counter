@@ -1,0 +1,19 @@
+{
+	"$schema": "https://schemas.wp.org/trunk/block.json",
+	"apiVersion": 3,
+	"name": "post-views-counter/most-viewed-terms",
+	"version": "1.0.0",
+	"title": "Most Viewed Terms",
+	"category": "post-views-counter",
+	"icon": "list-view",
+	"description": "Displays a list of the most viewed terms. Requires Post Views Counter Pro.",
+	"keywords": [ "views", "popular", "taxonomy", "category", "tag", "pro" ],
+	"attributes": {},
+	"supports": {
+		"html": false,
+		"multiple": false,
+		"reusable": false
+	},
+	"textdomain": "post-views-counter",
+	"editorScript": "file:../index.js"
+}

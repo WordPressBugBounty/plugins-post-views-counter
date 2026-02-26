@@ -2,7 +2,7 @@
 /*
 Plugin Name: Post Views Counter
 Description: Post Views Counter allows you to collect and display how many times a post, page, or other content has been viewed in a simple, fast and reliable way.
-Version: 1.7.6
+Version: 1.7.7
 Author: dFactory
 Author URI: https://dfactory.co/
 Plugin URI: https://postviewscounter.com/
@@ -30,7 +30,7 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 	 * Post Views Counter final class.
 	 *
 	 * @class Post_Views_Counter
-	 * @version	1.7.6
+	 * @version	1.7.7
 	 */
 	final class Post_Views_Counter {
 
@@ -88,6 +88,8 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 					'groups' => [],
 					'roles'	 => []
 				],
+				'restrict_display_groups'	=> [],
+				'restrict_display_roles'	=> [],
 				'position'				=> 'after',
 				'post_views_column'		=> true,
 				'restrict_edit_views'	=> false,
@@ -109,7 +111,7 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 			'integrations' => [
 				'integrations'			=> []
 			],
-			'version'	=> '1.7.6'
+			'version'	=> '1.7.7'
 		];
 
 		// instances
@@ -340,38 +342,48 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 		/**
 		 * Register blocks.
 		 *
-		 * @global object $wp_version
-		 *
 		 * @return void
 		 */
 		public function register_blocks() {
-			global $wp_version;
-
 			// actions
 			add_action( 'enqueue_block_editor_assets', [ $this, 'block_editor_enqueue_scripts' ] );
 
 			// filters
-			if ( version_compare( $wp_version, '5.8', '>=' ) )
-				add_filter( 'block_categories_all', [ $this, 'add_block_category' ] );
-			else
-				add_filter( 'block_categories', [ $this, 'add_block_category' ] );
+			add_filter( 'block_categories_all', [ $this, 'add_block_category' ] );
 
 			add_filter( 'register_block_type_args', [ $this, 'update_block_args' ], 10, 2 );
 
 			register_block_type( __DIR__ . '/blocks/most-viewed-posts' );
 			register_block_type( __DIR__ . '/blocks/post-views' );
+
+			// register Pro placeholder blocks when Pro is not active
+			if ( ! class_exists( 'Post_Views_Counter_Pro' ) ) {
+				$pro_placeholders = [
+					'most-viewed-terms',
+					'most-viewed-users',
+					'term-views',
+					'user-views',
+					'site-views'
+				];
+
+				foreach ( $pro_placeholders as $block_slug ) {
+					register_block_type( __DIR__ . '/blocks/pro-placeholder/' . $block_slug );
+				}
+			}
 		}
 
 		/**
 		 * Enqueue block scripts.
 		 *
-		 * @global object $wp_version
-		 *
 		 * @return void
 		 */
 		public function block_editor_enqueue_scripts() {
-			// enqueue script
-			wp_enqueue_script( 'post-views-counter-block-editor-script', POST_VIEWS_COUNTER_URL . '/js/dummy.js', [] );
+			// register inline-only script handle
+			wp_register_script( 'post-views-counter-block-editor-script', false, [], false, true );
+			wp_enqueue_script( 'post-views-counter-block-editor-script' );
+
+			// enqueue block editor styles
+			wp_enqueue_style( 'pvc-block-editor', POST_VIEWS_COUNTER_URL . '/css/block-editor.css', [], $this->defaults['version'] );
 
 			$block_image_sizes = [];
 
@@ -394,7 +406,8 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 			$script_data = [
 				'postTypesKeys'	=> array_combine( array_keys( $post_types ), array_fill( 0, count( $post_types ), false ) ),
 				'postTypes'		=> $post_types,
-				'imageSizes'	=> $block_image_sizes
+				'imageSizes'	=> $block_image_sizes,
+				'isProActive'	=> class_exists( 'Post_Views_Counter_Pro' )
 			];
 
 			// force post as enabled

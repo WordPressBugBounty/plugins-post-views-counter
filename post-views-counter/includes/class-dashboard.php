@@ -186,6 +186,7 @@ class Post_Views_Counter_Dashboard {
 			<div class="pvc-dashboard-block"><span>' . esc_html__( 'Powered by', 'post-views-counter' ) . ' <a href="https://postviewscounter.com/?utm_source=post-views-counter-lite&utm_medium=link&utm_campaign=powered-by" target="_blank">Post Views Counter</a></span></div>
 		</div>';
 
+		// Output is admin-only, content is already escaped, and contains dynamic elements like canvas
 		echo $html;
 	}
 

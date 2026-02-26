@@ -7,7 +7,14 @@
 	"category": "post-views-counter",
 	"icon": "list-view",
 	"description": "Displays a list of the most viewed posts.",
-	"example": {},
+	"keywords": [ "views", "popular", "counter", "analytics", "trending" ],
+	"example": {
+		"attributes": {
+			"title": "Most Viewed Posts",
+			"numberOfPosts": 3,
+			"displayPostViews": true
+		}
+	},
 	"attributes": {
 		"title": {
 			"type": "string",

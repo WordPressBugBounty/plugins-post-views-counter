@@ -361,8 +361,16 @@ class Post_Views_Counter_Settings_Display {
 			$data[$value] = false;
 		}
 
+		if ( ! isset( $input['display_style'] ) ) {
+			$input['display_style'] = isset( $this->pvc->options['display']['display_style'] ) && is_array( $this->pvc->options['display']['display_style'] )
+				? wp_parse_args( $this->pvc->options['display']['display_style'], $data )
+				: $data;
+
+			return $input;
+		}
+
 		// any data?
-		if ( ! empty( $input['display_style'] && $input['display_style'] !== 'empty' && is_array( $input['display_style'] ) ) ) {
+		if ( $input['display_style'] !== 'empty' && is_array( $input['display_style'] ) ) {
 			foreach ( $input['display_style'] as $value ) {
 				if ( array_key_exists( $value, $field['options'] ) )
 					$data[$value] = true;

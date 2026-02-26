@@ -117,7 +117,7 @@ class Post_Views_Counter_List_Widget extends WP_Widget {
 		$html .= pvc_most_viewed_posts( $instance, false );
 		$html .= $args['after_widget'];
 
-		echo $html;
+		echo wp_kses_post( $html );
 	}
 
 	/** Render widget form.
@@ -216,6 +216,7 @@ class Post_Views_Counter_List_Widget extends WP_Widget {
 			</select>
 		</p>';
 
+		// Form output doesn't need wp_kses_post - it's admin-only and inputs are already escaped
 		echo $html;
 	}
 

@@ -633,7 +633,7 @@ if ( ! function_exists( 'pvc_post_views' ) ) {
 		);
 
 		if ( $display )
-			echo $html;
+			echo wp_kses_post( $html );
 		else
 			return $html;
 	}
@@ -770,7 +770,7 @@ if ( ! function_exists( 'pvc_most_viewed_posts' ) ) {
 		$html = apply_filters( 'pvc_most_viewed_posts_html', $html, $args );
 
 		if ( $display )
-			echo $html;
+			echo wp_kses_post( $html );
 		else
 			return $html;
 	}
