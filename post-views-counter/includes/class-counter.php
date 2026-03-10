@@ -270,21 +270,16 @@ class Post_Views_Counter_Counter {
 		$ips = $pvc->options['general']['exclude_ips'];
 
 		// whether to count this ip
-		if ( ! empty( $ips ) && filter_var( preg_replace( '/[^0-9a-fA-F:., ]/', '', $user_ip ), FILTER_VALIDATE_IP ) ) {
+		if ( ! empty( $ips ) && $this->validate_user_ip( $user_ip ) ) {
 			// check ips
 			foreach ( $ips as $ip ) {
-				if ( strpos( $ip, '*' ) !== false ) {
-					if ( $this->ipv4_in_range( $user_ip, $ip ) )
-						return false;
-				} else {
-					if ( $user_ip === $ip )
-						return false;
-				}
+				if ( $this->is_excluded_ip( $user_ip, $ip ) )
+					return false;
 			}
 		}
 
 		// get groups to check them faster
-		$groups = $pvc->options['general']['exclude']['groups'];
+		$groups = isset( $pvc->options['general']['exclude']['groups'] ) && is_array( $pvc->options['general']['exclude']['groups'] ) ? $pvc->options['general']['exclude']['groups'] : [];
 
 		// whether to count this user
 		if ( ! empty( $user_id ) ) {
@@ -1224,6 +1219,8 @@ class Post_Views_Counter_Counter {
 	 * @return bool
 	 */
 	public function is_user_role_excluded( $user_id, $option = [] ) {
+		$option = is_array( $option ) ? $option : [];
+
 		// get user by ID
 		$user = get_user_by( 'id', $user_id );
 
@@ -1262,6 +1259,93 @@ class Post_Views_Counter_Counter {
 	}
 
 	/**
+	 * Normalize an IP address for consistent comparisons.
+	 *
+	 * @param string $ip
+	 *
+	 * @return string
+	 */
+	public function normalize_ip( $ip ) {
+		$ip = $this->sanitize_ip( trim( $ip ) );
+
+		if ( $ip === '' || filter_var( $ip, FILTER_VALIDATE_IP ) === false )
+			return '';
+
+		if ( function_exists( 'inet_pton' ) && function_exists( 'inet_ntop' ) ) {
+			$packed_ip = inet_pton( $ip );
+
+			if ( $packed_ip !== false ) {
+				$normalized_ip = inet_ntop( $packed_ip );
+
+				if ( is_string( $normalized_ip ) )
+					$ip = $normalized_ip;
+			}
+		}
+
+		return strtolower( $ip );
+	}
+
+	/**
+	 * Validate and normalize an IP exclusion rule.
+	 *
+	 * Exact IPv4 and IPv6 addresses are supported. Wildcards remain IPv4-only.
+	 *
+	 * @param string $ip
+	 *
+	 * @return string
+	 */
+	public function validate_excluded_ip( $ip ) {
+		$ip = $this->sanitize_ip( trim( $ip ) );
+
+		if ( $ip === '' )
+			return '';
+
+		if ( strpos( $ip, '*' ) !== false ) {
+			$wildcard_ip = str_replace( '*', '0', $ip );
+
+			if ( filter_var( $wildcard_ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4 ) !== false )
+				return $ip;
+
+			return '';
+		}
+
+		return $this->normalize_ip( $ip );
+	}
+
+	/**
+	 * Check whether a visitor IP matches an exclusion rule.
+	 *
+	 * @param string $user_ip
+	 * @param string $excluded_ip
+	 *
+	 * @return bool
+	 */
+	public function is_excluded_ip( $user_ip, $excluded_ip ) {
+		$user_ip = $this->normalize_ip( $user_ip );
+		$excluded_ip = $this->validate_excluded_ip( $excluded_ip );
+
+		if ( $user_ip === '' || $excluded_ip === '' )
+			return false;
+
+		if ( strpos( $excluded_ip, '*' ) !== false ) {
+			if ( filter_var( $user_ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4 ) === false )
+				return false;
+
+			return $this->ipv4_in_range( $user_ip, $excluded_ip );
+		}
+
+		if ( function_exists( 'inet_pton' ) ) {
+			$user_ip_binary = inet_pton( $user_ip );
+			$excluded_ip_binary = inet_pton( $excluded_ip );
+
+			if ( $user_ip_binary !== false && $excluded_ip_binary !== false )
+				return hash_equals( $excluded_ip_binary, $user_ip_binary );
+		}
+
+		return ( $user_ip === strtolower( $excluded_ip ) );
+	}
+
+	/**
 	 * Get user real IP address.
 	 *
 	 * @return string
@@ -1282,7 +1366,7 @@ class Post_Views_Counter_Counter {
 		// If strategy is remote_addr only, return REMOTE_ADDR if valid
 		if ( $strategy === 'remote_addr' ) {
 			if ( $this->validate_user_ip( $remote_addr ) )
-				return $remote_addr;
+				return $this->normalize_ip( $remote_addr );
 
 			return '';
 		}
@@ -1312,14 +1396,14 @@ class Post_Views_Counter_Counter {
 
 					// Validate the IP
 					if ( $this->validate_user_ip( $header_ip ) )
-						return $header_ip;
+						return $this->normalize_ip( $header_ip );
 				}
 			}
 		}
 
 		// Fallback to REMOTE_ADDR if valid
 		if ( $this->validate_user_ip( $remote_addr ) )
-			return $remote_addr;
+			return $this->normalize_ip( $remote_addr );
 
 		return '';
 	}
@@ -1378,14 +1462,19 @@ class Post_Views_Counter_Counter {
 	}
 
 	/**
-	 * Ensure an IP address is both a valid IP and does not fall within a private network range.
+	 * Ensure an IP address is public and routable.
 	 *
 	 * @param string $ip
 	 *
 	 * @return bool
 	 */
 	public function validate_user_ip( $ip ) {
-		if ( filter_var( $ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4 | FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE ) === false )
+		$ip = $this->normalize_ip( $ip );
+
+		if ( $ip === '' )
+			return false;
+
+		if ( filter_var( $ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE ) === false )
 			return false;
 
 		return true;

@@ -139,7 +139,7 @@ class Post_Views_Counter_Frontend {
 		}
 
 		// get groups to check it faster
-		$groups = $pvc->options['display']['restrict_display']['groups'];
+		$groups = isset( $pvc->options['display']['restrict_display']['groups'] ) && is_array( $pvc->options['display']['restrict_display']['groups'] ) ? $pvc->options['display']['restrict_display']['groups'] : [];
 
 		// whether to display views
 		if ( is_user_logged_in() ) {
@@ -210,7 +210,7 @@ class Post_Views_Counter_Frontend {
 			return;
 
 		// get countable post types
-		$post_types = $pvc->options['general']['post_types_count'];
+		$post_types = (array) $pvc->options['general']['post_types_count'];
 
 		// whether to count this post type or not
 		if ( empty( $post_types ) || ! is_singular( $post_types ) )

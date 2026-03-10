@@ -98,7 +98,7 @@ class Post_Views_Counter_Admin {
 		$post_views = ! empty( $data['post_views'] ) ? (int) $data['post_views'] : 0;
 
 		// get countable post types
-		$post_types = $pvc->options['general']['post_types_count'];
+		$post_types = (array) $pvc->options['general']['post_types_count'];
 
 		// check if post exists
 		$post = get_post( $post_id );

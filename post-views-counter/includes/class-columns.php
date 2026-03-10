@@ -38,9 +38,10 @@ class Post_Views_Counter_Columns {
 
 		// get main instance
 		$pvc = Post_Views_Counter();
+		$post_types = (array) $pvc->options['general']['post_types_count'];
 
 		// break if display is not allowed
-		if ( ! $pvc->options['display']['post_views_column'] || ! in_array( $post->post_type, $pvc->options['general']['post_types_count'] ) )
+		if ( ! $pvc->options['display']['post_views_column'] || ! in_array( $post->post_type, $post_types, true ) )
 			return;
 
 		// check if user can see post stats
@@ -209,9 +210,10 @@ class Post_Views_Counter_Columns {
 		
 		// get main instance
 		$pvc = Post_Views_Counter();
+		$post_types = (array) $pvc->options['general']['post_types_count'];
 
 		// break if display is disabled
-		if ( ! $pvc->options['display']['post_views_column'] || ! in_array( $post_type, $pvc->options['general']['post_types_count'] ) )
+		if ( ! $pvc->options['display']['post_views_column'] || ! in_array( $post_type, $post_types, true ) )
 			return $columns;
 
 		// check if user can see stats
@@ -326,9 +328,10 @@ class Post_Views_Counter_Columns {
 		
 		// get main instance
 		$pvc = Post_Views_Counter();
+		$post_types = (array) $pvc->options['general']['post_types_count'];
 
 		// break if display is not allowed
-		if ( ! $pvc->options['display']['post_views_column'] || ! in_array( $post_type, $pvc->options['general']['post_types_count'] ) )
+		if ( ! $pvc->options['display']['post_views_column'] || ! in_array( $post_type, $post_types, true ) )
 			return;
 		
 		// check if user can see stats

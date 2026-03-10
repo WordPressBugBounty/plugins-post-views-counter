@@ -234,13 +234,14 @@ class Post_Views_Counter_Traffic_Signals {
 
 		$screen = get_current_screen();
 		$pvc = Post_Views_Counter();
+		$post_types = (array) $pvc->options['general']['post_types_count'];
 
 		// check if traffic signals should be displayed
 		if ( ! $screen || ! $screen->post_type )
 			return;
 
 		// check if this post type has view counting enabled
-		if ( ! in_array( $screen->post_type, $pvc->options['general']['post_types_count'], true ) )
+		if ( ! in_array( $screen->post_type, $post_types, true ) )
 			return;
 
 		// enqueue Microtip CSS for tooltips

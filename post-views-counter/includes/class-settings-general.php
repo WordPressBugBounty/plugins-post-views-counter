@@ -523,6 +523,13 @@ class Post_Views_Counter_Settings_General {
 	public function setting_exclude_ips() {
 		// get ip addresses
 		$ips = $this->pvc->options['general']['exclude_ips'];
+		$current_ip = '';
+
+		if ( isset( $this->pvc->counter ) && method_exists( $this->pvc->counter, 'get_user_ip' ) )
+			$current_ip = $this->pvc->counter->get_user_ip();
+
+		if ( $current_ip === '' && isset( $_SERVER['REMOTE_ADDR'] ) )
+			$current_ip = sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ) );
 
 		$html = '<div class="pvc-ip-box-group">';
 
@@ -545,10 +552,10 @@ class Post_Views_Counter_Settings_General {
 
 		$html .= '
 		<div class="pvc-field-group pvc-buttons-group">
-				<input type="button" class="button outline pvc-add-exclude-ip" value="' . esc_attr__( 'Add new', 'post-views-counter' ) . '" /> <input type="button" class="button outline pvc-add-current-ip" value="' . esc_attr__( 'Add my current IP', 'post-views-counter' ) . '" data-rel="' . esc_attr( $_SERVER['REMOTE_ADDR'] ) . '" />
+				<input type="button" class="button outline pvc-add-exclude-ip" value="' . esc_attr__( 'Add new', 'post-views-counter' ) . '" /> <input type="button" class="button outline pvc-add-current-ip" value="' . esc_attr__( 'Add my current IP', 'post-views-counter' ) . '" data-rel="' . esc_attr( $current_ip ) . '" />
 		</div>';
 
-		$html .= '<p class="description">' . esc_html__( 'Add IP addresses or wildcards (e.g. 192.168.0.*) to exclude them from counting views.', 'post-views-counter' ) . '</p>';
+		$html .= '<p class="description">' . esc_html__( 'Add IPv4 or IPv6 addresses to exclude them from counting views. Wildcards are supported for IPv4 only (e.g. 192.168.0.*).', 'post-views-counter' ) . '</p>';
 
 		return $html;
 	}
@@ -566,13 +573,13 @@ class Post_Views_Counter_Settings_General {
 			$ips = [];
 
 			foreach ( $input['exclude_ips'] as $ip ) {
-				if ( strpos( $ip, '*' ) !== false ) {
-					$new_ip = str_replace( '*', '0', $ip );
+				$validated_ip = '';
 
-					if ( filter_var( $new_ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4 ) )
-						$ips[] = $ip;
-				} elseif ( filter_var( $ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4 ) )
-					$ips[] = $ip;
+				if ( isset( $this->pvc->counter ) && method_exists( $this->pvc->counter, 'validate_excluded_ip' ) )
+					$validated_ip = $this->pvc->counter->validate_excluded_ip( $ip );
+
+				if ( $validated_ip !== '' )
+					$ips[] = $validated_ip;
 			}
 
 			$input['exclude_ips'] = array_unique( $ips );

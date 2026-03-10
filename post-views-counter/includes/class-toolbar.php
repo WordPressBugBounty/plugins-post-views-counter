@@ -73,7 +73,7 @@ class Post_Views_Counter_Toolbar {
 			global $post;
 
 		// get countable post types
-		$post_types = $pvc->options['general']['post_types_count'];
+		$post_types = (array) $pvc->options['general']['post_types_count'];
 
 		// break if display is not allowed
 		if ( empty( $post_types ) || empty( $post ) || ! in_array( $post->post_type, $post_types, true ) )
@@ -169,7 +169,7 @@ class Post_Views_Counter_Toolbar {
 			global $post;
 
 		// get countable post types
-		$post_types = $pvc->options['general']['post_types_count'];
+		$post_types = (array) $pvc->options['general']['post_types_count'];
 
 		// break if display is not allowed
 		if ( empty( $post_types ) || empty( $post ) || ! in_array( $post->post_type, $post_types, true ) )

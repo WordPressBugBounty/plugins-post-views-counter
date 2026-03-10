@@ -37,9 +37,10 @@ class Post_Views_Counter_Columns_Modal {
 
 		$screen = get_current_screen();
 		$pvc = Post_Views_Counter();
+		$post_types = (array) $pvc->options['general']['post_types_count'];
 
 		// break if display is not allowed
-		if ( ! $pvc->options['display']['post_views_column'] || ! in_array( $screen->post_type, $pvc->options['general']['post_types_count'], true ) )
+		if ( ! $pvc->options['display']['post_views_column'] || ! in_array( $screen->post_type, $post_types, true ) )
 			return;
 
 		// check if user can see stats
@@ -91,6 +92,7 @@ class Post_Views_Counter_Columns_Modal {
 
 		// get PVC instance
 		$pvc = Post_Views_Counter();
+		$post_types = (array) $pvc->options['general']['post_types_count'];
 
 		// get post ID
 		$post_id = isset( $_POST['post_id'] ) ? absint( $_POST['post_id'] ) : 0;
@@ -109,7 +111,7 @@ class Post_Views_Counter_Columns_Modal {
 			wp_send_json_error( [ 'message' => __( 'Admin column disabled.', 'post-views-counter' ) ] );
 
 		// ensure post type is tracked
-		if ( ! in_array( $post->post_type, $pvc->options['general']['post_types_count'], true ) )
+		if ( ! in_array( $post->post_type, $post_types, true ) )
 			wp_send_json_error( [ 'message' => __( 'Post type is not tracked.', 'post-views-counter' ) ] );
 
 		// check display permission for this specific post
