@@ -3,8 +3,8 @@ Contributors: dfactory
 Tags: counter, postviews, statistics, analytics, pageviews
 Requires at least: 6.3.0
 Requires PHP: 7.0
-Tested up to: 6.9.1
-Stable tag: 1.7.8
+Tested up to: 6.9.4
+Stable tag: 1.7.9
 License: MIT License
 License URI: http://opensource.org/licenses/MIT
 
@@ -91,6 +91,11 @@ If you’ve purchased Post Views Counter Pro, your license includes one year of 
 2. screenshot-2.png
 
 == Changelog ==
+
+= 1.7.9 =
+* New: Lazy-load widgets loading.
+* New (Pro): Add Kadence Blocks integration for Posts block ordering by views
+* New (Pro): Add CoBlocks integration for Posts and Post Carousel ordering by views
 
 = 1.7.8 =
 * Fix: Harden option-backed in_array() checks to prevent PHP 8.x TypeErrors.
@@ -460,5 +465,5 @@ Initial release
 
 == Upgrade Notice ==
 
-= 1.7.8 =
-Improves PHP 8.x compatibility, fixes IPv6 excluded IP handling, and updates internal build tooling.
+= 1.7.9 =
+Adds lazy-load widgets loading. Adds Kadence Blocks and CoBlocks integration in PVC Pro.

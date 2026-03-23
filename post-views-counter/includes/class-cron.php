@@ -63,10 +63,14 @@ class Post_Views_Counter_Cron {
 	public function cron_time_intervals( $schedules ) {
 		// get main instance
 		$pvc = Post_Views_Counter();
+		$display = 'Post Views Counter reset daily counts interval';
+
+		if ( did_action( 'init' ) )
+			$display = __( 'Post Views Counter reset daily counts interval', 'post-views-counter' );
 
 		$schedules['post_views_counter_interval'] = [
 			'interval'	=> DAY_IN_SECONDS,
-			'display'	=> __( 'Post Views Counter reset daily counts interval', 'post-views-counter' )
+			'display'	=> $display
 		];
 
 		return $schedules;

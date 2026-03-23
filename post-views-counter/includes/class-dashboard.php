@@ -81,7 +81,11 @@ class Post_Views_Counter_Dashboard {
 		$script_data = [
 			'ajaxURL'	=> admin_url( 'admin-ajax.php' ),
 			'nonce'		=> wp_create_nonce( 'pvc-dashboard-widget' ),
-			'nonceUser'	=> wp_create_nonce( 'pvc-dashboard-user-options' )
+			'nonceUser'	=> wp_create_nonce( 'pvc-dashboard-user-options' ),
+			'i18n'		=> [
+				'loadError' => __( 'Failed to load this widget.', 'post-views-counter' ),
+				'retry' => __( 'Retry', 'post-views-counter' ),
+			]
 		];
 
 		$script_data = apply_filters( 'pvc_admin_dashboard_script_data', $script_data );
@@ -223,6 +227,7 @@ class Post_Views_Counter_Dashboard {
 					</div>
 					<div class="pvc-data-container">
 						<?php echo wp_kses( $item['content'], $allowed_html ); ?>
+						<div class="pvc-dashboard-message" aria-live="polite"></div>
 						<span class="spinner"></span>
 					</div>
 					<div class="pvc-dashboard-content-bottom">

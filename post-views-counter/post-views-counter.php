@@ -2,7 +2,7 @@
 /*
 Plugin Name: Post Views Counter
 Description: Post Views Counter allows you to collect and display how many times a post, page, or other content has been viewed in a simple, fast and reliable way.
-Version: 1.7.8
+Version: 1.7.9
 Author: dFactory
 Author URI: https://dfactory.co/
 Plugin URI: https://postviewscounter.com/
@@ -30,7 +30,7 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 	 * Post Views Counter final class.
 	 *
 	 * @class Post_Views_Counter
-	 * @version	1.7.8
+	 * @version	1.7.9
 	 */
 	final class Post_Views_Counter {
 
@@ -111,7 +111,7 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 			'integrations' => [
 				'integrations'			=> []
 			],
-			'version'	=> '1.7.8'
+			'version'	=> '1.7.9'
 		];
 
 		// instances
@@ -262,10 +262,6 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 			// define plugin constants
 			$this->define_constants();
 
-			// load translations early to avoid just-in-time loading warnings in WP 6.7+
-			if ( ! ( defined( 'SHORTINIT' ) && SHORTINIT ) )
-				$this->load_textdomain();
-
 			// short init?
 			if ( defined( 'SHORTINIT' ) && SHORTINIT ) {
 				$this->options = [
@@ -319,6 +315,7 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 			add_action( 'admin_enqueue_scripts', [ $this, 'admin_enqueue_scripts' ] );
 			add_action( 'admin_print_styles', [ $this, 'admin_print_styles' ] );
 			add_action( 'wp_loaded', [ $this, 'load_pluggable_functions' ] );
+			add_action( 'init', [ $this, 'load_textdomain' ] );
 			add_action( 'init', [ $this, 'register_blocks' ] );
 			add_action( 'admin_init', [ $this, 'update_notice' ] );
 			add_action( 'wp_initialize_site', [ $this, 'init_new_network_site' ] );

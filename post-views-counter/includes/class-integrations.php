@@ -13,6 +13,18 @@ if ( ! defined( 'ABSPATH' ) )
 class Post_Views_Counter_Integrations {
 
 	/**
+	 * Get all registered integration definitions (base + filtered).
+	 *
+	 * This is the canonical definition list used for save validation and UI rendering.
+	 * Pro and other plugins add integrations here via the pvc_integrations filter.
+	 *
+	 * @return array
+	 */
+	public static function get_registered_integrations() {
+		return apply_filters( 'pvc_integrations', self::get_base_integrations() );
+	}
+
+	/**
 	 * Get all integrations with their definitions and effective status.
 	 *
 	 * @return array
@@ -24,11 +36,8 @@ class Post_Views_Counter_Integrations {
 		// get saved statuses
 		$saved_statuses = isset( $pvc->options['integrations']['integrations'] ) ? $pvc->options['integrations']['integrations'] : [];
 
-		// base integrations
-		$integrations = self::get_base_integrations();
-
-		// allow filtering
-		$integrations = apply_filters( 'pvc_integrations', $integrations );
+		// get all registered integrations (base + any added via pvc_integrations filter)
+		$integrations = self::get_registered_integrations();
 
 		// compute effective status for each
 		foreach ( $integrations as $slug => &$integration ) {
@@ -156,6 +165,26 @@ class Post_Views_Counter_Integrations {
 					]
 				]
 			],
+			'coblocks' => [
+				'name' => 'CoBlocks',
+				'description' => __( 'Integrate with CoBlocks to order post feed results by views.', 'post-views-counter' ),
+				'menu_order' => 20,
+				'pro' => true,
+				'availability_check' => function() { return defined( 'COBLOCKS_VERSION' ); },
+				'enabled_check' => function( $default_status, $integration, $slug, $saved_status ) { return $default_status; },
+				'items' => [
+					[
+						'name' => __( 'Posts Block', 'post-views-counter' ),
+						'description' => __( 'Adds post views ordering to the CoBlocks Posts block.', 'post-views-counter' ),
+						'status' => true
+					],
+					[
+						'name' => __( 'Post Carousel Block', 'post-views-counter' ),
+						'description' => __( 'Adds post views ordering to the CoBlocks Post Carousel block.', 'post-views-counter' ),
+						'status' => true
+					]
+				]
+			],
 			'divi' => [
 				'name' => 'Divi',
 				'description' => __( 'Integrate with Divi Theme to order module posts by views when the module uses the "orderby-post-views" CSS class.', 'post-views-counter' ),
@@ -237,6 +266,21 @@ class Post_Views_Counter_Integrations {
 					[
 						'name' => __( 'Listing Grid', 'post-views-counter' ),
 						'description' => __( 'Enables ordering posts by view count in Listing Grid, Maps Listing and Calendar widgets.', 'post-views-counter' ),
+						'status' => true
+					]
+				]
+			],
+			'kadence-blocks' => [
+				'name' => 'Kadence Blocks',
+				'description' => __( 'Integrate with Kadence Blocks to order post results by views in the Posts block.', 'post-views-counter' ),
+				'menu_order' => 20,
+				'pro' => true,
+				'availability_check' => function() { return defined( 'KADENCE_BLOCKS_VERSION' ); },
+				'enabled_check' => function( $default_status, $integration, $slug, $saved_status ) { return $default_status; },
+				'items' => [
+					[
+						'name' => __( 'Posts Block', 'post-views-counter' ),
+						'description' => __( 'Adds post views ordering to the Posts block.', 'post-views-counter' ),
 						'status' => true
 					]
 				]

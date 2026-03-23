@@ -909,10 +909,10 @@ class Post_Views_Counter_Settings {
 				$input['integrations'] = [];
 			}
 
-			// get all known integrations
-			$known_integrations = array_keys( Post_Views_Counter_Integrations::get_base_integrations() );
+			// get all registered integrations (base + any added via pvc_integrations filter)
+			$known_integrations = array_keys( Post_Views_Counter_Integrations::get_registered_integrations() );
 
-			// preserve unknown slugs from existing settings
+			// preserve truly unknown slugs (not in the registered list) from existing settings
 			$existing = $pvc->options['integrations']['integrations'];
 			foreach ( $existing as $slug => $status ) {
 				if ( ! in_array( $slug, $known_integrations, true ) ) {
@@ -920,7 +920,7 @@ class Post_Views_Counter_Settings {
 				}
 			}
 
-			// set missing known integrations to false (unchecked boxes don't submit)
+			// set missing registered integrations to false (unchecked boxes don't submit)
 			foreach ( $known_integrations as $slug ) {
 				if ( ! isset( $input['integrations'][$slug] ) ) {
 					$input['integrations'][$slug] = false;
