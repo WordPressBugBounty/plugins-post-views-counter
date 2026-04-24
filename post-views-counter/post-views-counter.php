@@ -2,7 +2,7 @@
 /*
 Plugin Name: Post Views Counter
 Description: Post Views Counter allows you to collect and display how many times a post, page, or other content has been viewed in a simple, fast and reliable way.
-Version: 1.7.9
+Version: 1.7.10
 Author: dFactory
 Author URI: https://dfactory.co/
 Plugin URI: https://postviewscounter.com/
@@ -30,7 +30,7 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 	 * Post Views Counter final class.
 	 *
 	 * @class Post_Views_Counter
-	 * @version	1.7.9
+	 * @version	1.7.10
 	 */
 	final class Post_Views_Counter {
 
@@ -111,7 +111,7 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 			'integrations' => [
 				'integrations'			=> []
 			],
-			'version'	=> '1.7.9'
+			'version'	=> '1.7.10'
 		];
 
 		// instances
@@ -270,6 +270,8 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 					'other'		=> array_merge( $this->defaults['other'], get_option( 'post_views_counter_settings_other', $this->defaults['other'] ) )
 				];
 
+				$this->options['general']['time_between_counts'] = $this->normalize_time_between_counts( isset( $this->options['general']['time_between_counts'] ) ? $this->options['general']['time_between_counts'] : null );
+
 				// migrate exclude to new fields
 				if ( isset( $this->options['general']['exclude'] ) && is_array( $this->options['general']['exclude'] ) ) {
 					if ( ! isset( $this->options['general']['exclude_groups'] ) )
@@ -293,6 +295,8 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 				'other'			=> array_merge( $this->defaults['other'], get_option( 'post_views_counter_settings_other', $this->defaults['other'] ) ),
 				'integrations'	=> array_merge( $this->defaults['integrations'], get_option( 'post_views_counter_settings_integrations', $this->defaults['integrations'] ) )
 			];
+
+			$this->options['general']['time_between_counts'] = $this->normalize_time_between_counts( isset( $this->options['general']['time_between_counts'] ) ? $this->options['general']['time_between_counts'] : null );
 
 			// 1.5.3+
 			if ( ! isset( $this->options['general']['post_views_column'] ) )
@@ -353,7 +357,7 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 			register_block_type( __DIR__ . '/blocks/most-viewed-posts' );
 			register_block_type( __DIR__ . '/blocks/post-views' );
 
-			// register Pro placeholder blocks when Pro is not active
+			// register placeholder blocks when the related blocks are unavailable
 			if ( ! class_exists( 'Post_Views_Counter_Pro' ) ) {
 				$pro_placeholders = [
 					'most-viewed-terms',
@@ -429,7 +433,7 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 		 *
 		 * @return array
 		 */
-		function update_block_args( $args, $block_type ) {
+		public function update_block_args( $args, $block_type ) {
 			// most viewed posts block
 			if ( $block_type === 'post-views-counter/most-viewed-posts' )
 				$args['render_callback'] = [ $this, 'most_viewed_posts_render_callback' ];
@@ -448,7 +452,7 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 		 *
 		 * @return array
 		 */
-		function most_viewed_posts_render_callback( $attributes, $content ) {
+		public function most_viewed_posts_render_callback( $attributes, $content ) {
 			$post_types = [];
 
 			foreach ( $attributes['postTypes'] as $post_type => $enabled ) {
@@ -492,7 +496,7 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 		 *
 		 * @return array
 		 */
-		function post_views_render_callback( $attributes, $content ) {
+		public function post_views_render_callback( $attributes, $content ) {
 			$html = '<div ' . get_block_wrapper_attributes() . '>';
 			$html .= pvc_post_views( (int) $attributes['postID'], false, $attributes['period'] );
 			$html .= '</div>';
@@ -507,7 +511,7 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 		 *
 		 * @return array
 		 */
-		function add_block_category( $categories ) {
+		public function add_block_category( $categories ) {
 			$categories[] = [
 				'slug'	=> 'post-views-counter',
 				'title'	=> 'Post Views Counter'
@@ -994,6 +998,59 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 				}
 			</style>
 			';
+		}
+
+		/**
+		 * Normalize the Count Interval option to canonical hours.
+		 *
+		 * @param mixed $time_between_counts
+		 * @param array $default_interval
+		 *
+		 * @return array
+		 */
+		public function normalize_time_between_counts( $time_between_counts, $default_interval = [] ) {
+			$default_number = isset( $default_interval['number'] ) ? (int) $default_interval['number'] : (int) $this->defaults['general']['time_between_counts']['number'];
+			$default_interval = [
+				'number'	=> $default_number,
+				'type'		=> 'hours'
+			];
+
+			if ( ! is_array( $time_between_counts ) )
+				return $default_interval;
+
+			if ( ! isset( $time_between_counts['number'], $time_between_counts['type'] ) || ! is_scalar( $time_between_counts['number'] ) || ! is_scalar( $time_between_counts['type'] ) )
+				return $default_interval;
+
+			$number = (int) $time_between_counts['number'];
+			$type = sanitize_key( (string) $time_between_counts['type'] );
+
+			switch ( $type ) {
+				case 'minutes':
+					$hours = (int) ( $number / 60 );
+					break;
+				case 'hours':
+					$hours = $number;
+					break;
+				case 'days':
+					$hours = $number * 24;
+					break;
+				case 'weeks':
+					$hours = $number * 168;
+					break;
+				case 'months':
+					$hours = $number * 720;
+					break;
+				case 'years':
+					$hours = $number * 24 * 365;
+					break;
+				default:
+					return $default_interval;
+			}
+
+			return [
+				'number'	=> max( 0, min( 720, (int) $hours ) ),
+				'type'		=> 'hours'
+			];
 		}
 
 		/**

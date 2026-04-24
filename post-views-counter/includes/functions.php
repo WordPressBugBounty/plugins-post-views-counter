@@ -95,7 +95,7 @@ if ( ! function_exists( 'pvc_get_post_views' ) ) {
 			}
 		}
 
-		// handle explicit content parameter (for Pro plugin or custom implementations)
+		// handle explicit content parameter for custom implementations
 		if ( isset( $args['content'] ) ) {
 			$where['content'] = 'content = ' . (int) $args['content'];
 		}

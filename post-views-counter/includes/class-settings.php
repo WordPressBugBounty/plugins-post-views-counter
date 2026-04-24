@@ -279,7 +279,7 @@ class Post_Views_Counter_Settings {
 			)
 		];
 
-		// Backward compatibility: ensure legacy settings keys exist for older Pro versions.
+		// Backward compatibility: ensure legacy settings keys exist for older companion versions.
 		if ( ! isset( $settings['post-views-counter'] ) || ! is_array( $settings['post-views-counter'] ) )
 			$settings['post-views-counter'] = [];
 
@@ -308,7 +308,7 @@ class Post_Views_Counter_Settings {
 				'pvc_settings_data'
 			);
 
-			// Copy Pro's changes from 'exclude' field back to 'exclude_groups' (Pro v1.7.0 compatibility)
+			// Copy compatibility changes from 'exclude' field back to 'exclude_groups' (v1.7.0 compatibility)
 			$settings = $this->sync_compat_fields( $settings );
 		}
 
@@ -316,17 +316,17 @@ class Post_Views_Counter_Settings {
 	}
 
 	/**
-	 * Normalize Pro-gated settings when Pro is active.
+	 * Normalize conditionally enabled settings when available.
 	 *
 	 * This runs at priority 10 (after settings_fields_compat at priority 2,
-	 * before Pro hooks at priority 11), ensuring the normalizer executes in
+	 * before later hooks at priority 11), ensuring the normalizer executes in
 	 * the main settings flow.
 	 *
 	 * @param array $settings
 	 * @return array
 	 */
 	public function normalize_pro_settings( $settings ) {
-		// Only run if Pro is active
+		// Only run when the related features are available
 		if ( ! class_exists( 'Post_Views_Counter_Pro' ) ) {
 			return $settings;
 		}
@@ -419,10 +419,10 @@ class Post_Views_Counter_Settings {
 	}
 
 	/**
-	 * Normalize Pro-gated fields when Pro is active.
+	 * Normalize conditionally enabled fields when available.
 	 *
-	 * This method removes PRO badges and disabled states from fields that are
-	 * purely Pro-gated (marked with pro_only metadata), while preserving any
+	 * This method removes badges and disabled states from fields that are
+	 * controlled by pro_only metadata, while preserving any
 	 * disabled states that are based on runtime availability (like missing
 	 * caching plugins, object cache, or integration dependencies).
 	 *
@@ -444,7 +444,7 @@ class Post_Views_Counter_Settings {
 
 			// Check if pro_only is an array (for option-level gating like counter_mode['ajax'])
 			if ( is_array( $field['pro_only'] ) ) {
-				// Remove pvc-pro-extended class from field (preserve other classes)
+				// Remove the disabled-state class from the field (preserve other classes)
 				if ( isset( $field['class'] ) ) {
 					$classes = array_filter( array_map( 'trim', explode( ' ', $field['class'] ) ) );
 					$classes = array_diff( $classes, [ 'pvc-pro', 'pvc-pro-extended' ] );
@@ -468,7 +468,7 @@ class Post_Views_Counter_Settings {
 			} else {
 				// Field-level gating - only unlock if available
 				if ( $is_available ) {
-					// Remove pvc-pro classes (preserve other classes)
+					// Remove disabled-state classes (preserve other classes)
 					if ( isset( $field['class'] ) ) {
 						$classes = array_filter( array_map( 'trim', explode( ' ', $field['class'] ) ) );
 						$classes = array_diff( $classes, [ 'pvc-pro', 'pvc-pro-extended' ] );
@@ -506,7 +506,7 @@ class Post_Views_Counter_Settings {
 	 * @return bool
 	 */
 	private function check_field_availability( $field_key, $field ) {
-		// Default to available (pure Pro licensing gate)
+		// Default to available (pure licensing gate)
 		$is_available = true;
 
 		// Check specific fields with runtime requirements
@@ -694,7 +694,7 @@ class Post_Views_Counter_Settings {
 			];
 		}
 
-		// Backward compatibility: ensure legacy reports tab exists for older Pro versions.
+		// Backward compatibility: ensure legacy reports tab exists for older companion versions.
 		if ( ! isset( $pages['post-views-counter']['tabs'] ) || ! is_array( $pages['post-views-counter']['tabs'] ) )
 			$pages['post-views-counter']['tabs'] = [];
 

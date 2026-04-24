@@ -300,7 +300,7 @@ class Post_Views_Counter_Import {
 	}
 
 	/**
-	 * Check if Post Views Counter Pro is active.
+	 * Check whether the related class is available.
 	 *
 	 * @return bool
 	 */

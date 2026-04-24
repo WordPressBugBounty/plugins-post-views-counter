@@ -697,7 +697,7 @@ class Post_Views_Counter_Settings_API {
 					if ( $is_disabled && is_array( $args['disabled'] ) )
 						$label_classes[] = $this->prefix . '-disabled';
 					
-					// add PRO class for disabled options in pro-extended fields
+					// add disabled-state class for disabled options in extended fields
 					if ( $is_disabled && ! empty( $args['class'] ) && strpos( $args['class'], 'pvc-pro-extended' ) !== false ) {
 						$label_classes[] = $this->prefix . '-pro';
 					}
@@ -736,7 +736,7 @@ class Post_Views_Counter_Settings_API {
 					if ( $is_disabled && is_array( $args['disabled'] ) )
 						$label_classes[] = $this->prefix . '-disabled';
 
-					// add PRO styling for disabled options in pro-extended fields
+					// add disabled-state styling for disabled options in extended fields
 					if ( $is_disabled && ! empty( $args['class'] ) && strpos( $args['class'], 'pvc-pro-extended' ) !== false )
 						$label_classes[] = $this->prefix . '-pro';
 

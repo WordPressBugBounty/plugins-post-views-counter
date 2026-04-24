@@ -16,7 +16,7 @@ class Post_Views_Counter_Integrations {
 	 * Get all registered integration definitions (base + filtered).
 	 *
 	 * This is the canonical definition list used for save validation and UI rendering.
-	 * Pro and other plugins add integrations here via the pvc_integrations filter.
+	 * Other plugins add integrations here via the pvc_integrations filter.
 	 *
 	 * @return array
 	 */

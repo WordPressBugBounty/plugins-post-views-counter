@@ -16,7 +16,7 @@ class Post_Views_Counter_Traffic_Signals {
 	 * @return void
 	 */
 	public function __construct() {
-		// early exit if traffic signals are disabled (e.g., by Pro plugin)
+		// early exit if traffic signals are disabled
 		if ( ! $this->is_enabled() )
 			return;
 
@@ -33,7 +33,7 @@ class Post_Views_Counter_Traffic_Signals {
 	/**
 	 * Check if traffic signals are enabled.
 	 *
-	 * Allows Pro plugin (or other extensions) to disable Free signals via filter.
+	 * Allows filters to disable traffic signals when needed.
 	 * Example: add_filter( 'pvc_enable_traffic_signals', '__return_false' );
 	 *
 	 * @return bool True if enabled, false otherwise
@@ -42,8 +42,7 @@ class Post_Views_Counter_Traffic_Signals {
 		/**
 		 * Filter whether traffic signals should be enabled.
 		 *
-		 * Pro plugin uses this to disable Free signals and prevent duplicates.
-		 * Site owners can override by removing the Pro filter if they want both.
+		 * Filters can use this to disable traffic signals and prevent duplicates.
 		 *
 		 * @param bool $enabled Whether traffic signals are enabled (default: true)
 		 */
@@ -56,7 +55,7 @@ class Post_Views_Counter_Traffic_Signals {
 	 * @return void
 	 */
 	public function register_signals_column() {
-		// check if traffic signals are enabled (Pro may disable this)
+		// check if traffic signals are enabled
 		if ( ! $this->is_enabled() )
 			return;
 
@@ -224,7 +223,7 @@ class Post_Views_Counter_Traffic_Signals {
 	 * @return void
 	 */
 	public function enqueue_signals_assets( $hook ) {
-		// check if traffic signals are enabled (Pro may disable this)
+		// check if traffic signals are enabled
 		if ( ! $this->is_enabled() )
 			return;
 

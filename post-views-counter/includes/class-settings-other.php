@@ -350,10 +350,10 @@ class Post_Views_Counter_Settings_Other {
 			$version = esc_html__( 'unknown', 'post-views-counter' );
 		}
 
-		// detect pro activation status
+		// detect companion plugin activation status
 		$pvc_pro_active = class_exists( 'Post_Views_Counter_Pro' );
 
-		// get pro version
+		// get companion plugin version
 		$pro_version = $pvc_pro_active ? get_option( 'post_views_counter_pro_version', '1.0.0' ) : '<span class="pvc-status pvc-status-missing">✗</span>';
 
 		// get database tables via filter

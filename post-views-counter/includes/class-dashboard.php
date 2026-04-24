@@ -166,6 +166,9 @@ class Post_Views_Counter_Dashboard {
 		// get user options
 		$user_options = get_user_meta( get_current_user_id(), 'pvc_dashboard', true );
 
+		// check whether the related features are available
+		$is_pro = class_exists( 'Post_Views_Counter_Pro' );
+
 		// empty options?
 		if ( empty( $user_options ) || ! is_array( $user_options ) )
 			$user_options = [];
@@ -186,8 +189,22 @@ class Post_Views_Counter_Dashboard {
 			$html .= $this->generate_dashboard_widget_item( $item, $menu_items );
 		}
 
+		if ( ! $is_pro ) {
+			$html .= '
+			<div class="pvc-dashboard-unlock">
+				<div class="pvc-dashboard-unlock-content">
+					<h3>' . esc_html__( 'More Insights', 'post-views-counter' ) . '</h3>
+					<ul>
+						<li>' . esc_html__( 'Go beyond basic post views.', 'post-views-counter' ) . '</li>
+						<li>' . esc_html__( 'See site views, referrers, popular searches, top users, and more.', 'post-views-counter' ) . '</li>
+					</ul>
+					<a href="https://postviewscounter.com/upgrade/?utm_source=post-views-counter-lite&utm_medium=link&utm_campaign=dashboard-unlock" class="button button-secondary" target="_blank">' . esc_html__( 'Unlock more insights', 'post-views-counter' ) . ' &rarr;</a>
+				</div>
+			</div>';
+		}
+
 		$html .= '
-			<div class="pvc-dashboard-block"><span>' . esc_html__( 'Powered by', 'post-views-counter' ) . ' <a href="https://postviewscounter.com/?utm_source=post-views-counter-lite&utm_medium=link&utm_campaign=powered-by" target="_blank">Post Views Counter</a></span></div>
+		<div class="pvc-dashboard-block"><span>' . esc_html__( 'Powered by', 'post-views-counter' ) . ' <a href="https://postviewscounter.com/?utm_source=post-views-counter-lite&utm_medium=link&utm_campaign=powered-by" target="_blank">Post Views Counter</a></span></div>
 		</div>';
 
 		// Output is admin-only, content is already escaped, and contains dynamic elements like canvas

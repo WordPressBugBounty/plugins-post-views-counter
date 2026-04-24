@@ -212,8 +212,9 @@ class Post_Views_Counter_Settings_General {
 				'type'			=> 'custom',
 				'description'	=> '',
 				'min'			=> 0,
-				'max'			=> 999999,
-				'options'		=> $time_types,
+				'max'			=> 720,
+				'type_value'	=> 'hours',
+				'type_label'	=> __( 'hours', 'post-views-counter' ),
 				'callback'		=> [ $this, 'setting_time_between_counts' ],
 				'validate'		=> [ $this, 'validate_time_between_counts' ]
 			],
@@ -366,17 +367,12 @@ class Post_Views_Counter_Settings_General {
 	 */
 	public function setting_time_between_counts( $field ) {
 		$html = '
-		<input size="6" type="number" min="' . ( (int) $field['min'] ) . '" max="' . ( (int) $field['max'] ) . '" name="post_views_counter_settings_general[time_between_counts][number]" value="' . esc_attr( $this->pvc->options['general']['time_between_counts']['number'] ) . '" />
-		<select name="post_views_counter_settings_general[time_between_counts][type]">';
-
-		foreach ( $field['options'] as $type => $type_name ) {
-			$html .= '
-			<option value="' . esc_attr( $type ) . '" ' . selected( $type, $this->pvc->options['general']['time_between_counts']['type'], false ) . '>' . esc_html( $type_name ) . '</option>';
-		}
-
-		$html .= '
-		</select>
-		<p class="description">' . __( 'Minimum time between counting new views from the same visitor. Enter <code>0</code> to count every page view.', 'post-views-counter' ) . '</p>';
+		<div class="pvc-field-group horizontal">
+			<input size="6" type="number" min="' . ( (int) $field['min'] ) . '" max="' . ( (int) $field['max'] ) . '" name="post_views_counter_settings_general[time_between_counts][number]" value="' . esc_attr( $this->pvc->options['general']['time_between_counts']['number'] ) . '" />
+			<input type="hidden" name="post_views_counter_settings_general[time_between_counts][type]" value="' . esc_attr( $field['type_value'] ) . '" />
+			<span>' . esc_html( $field['type_label'] ) . '</span>
+		</div>
+		<p class="description">' . __( 'Minimum time between counting new views from the same visitor, in hours. Enter <code>0</code> to count every page view.', 'post-views-counter' ) . '</p>';
 
 		return $html;
 	}
@@ -389,14 +385,10 @@ class Post_Views_Counter_Settings_General {
 	 * @return array
 	 */
 	public function validate_time_between_counts( $input, $field ) {
-		// number
-		$input['time_between_counts']['number'] = isset( $input['time_between_counts']['number'] ) ? (int) $input['time_between_counts']['number'] : $this->pvc->defaults['general']['time_between_counts']['number'];
-
-		if ( $input['time_between_counts']['number'] < $field['min'] || $input['time_between_counts']['number'] > $field['max'] )
-			$input['time_between_counts']['number'] = $this->pvc->defaults['general']['time_between_counts']['number'];
-
-		// type
-		$input['time_between_counts']['type'] = isset( $input['time_between_counts']['type'], $field['options'][$input['time_between_counts']['type']] ) ? $input['time_between_counts']['type'] : $this->pvc->defaults['general']['time_between_counts']['type'];
+		$input['time_between_counts'] = $this->pvc->normalize_time_between_counts(
+			isset( $input['time_between_counts'] ) ? $input['time_between_counts'] : null,
+			$this->pvc->defaults['general']['time_between_counts']
+		);
 
 		return $input;
 	}
@@ -658,7 +650,7 @@ class Post_Views_Counter_Settings_General {
 	public function get_caching_compatibility_label() {
 		$label = __( 'Enable compatibility tweaks for supported caching plugins.', 'post-views-counter' );
 
-		// add availability indicator when Pro is missing but feature is available
+		// add availability indicator when the feature is available
 		if ( ! class_exists( 'Post_Views_Counter_Pro' ) && $this->is_caching_compatibility_available() ) {
 			$label = '<span class="pvc-availability-status available">' . esc_html__( '(available)', 'post-views-counter' ) . '</span> ' . $label;
 		}
@@ -674,7 +666,7 @@ class Post_Views_Counter_Settings_General {
 	public function get_object_cache_label() {
 		$label = __( 'Enable Redis or Memcached object cache optimization.', 'post-views-counter' );
 
-		// add availability indicator when Pro is missing but feature is available
+		// add availability indicator when the feature is available
 		if ( ! class_exists( 'Post_Views_Counter_Pro' ) && $this->is_object_cache_available() ) {
 			$label = '<span class="pvc-availability-status available">' . esc_html__( '(available)', 'post-views-counter' ) . '</span> ' . $label;
 		}

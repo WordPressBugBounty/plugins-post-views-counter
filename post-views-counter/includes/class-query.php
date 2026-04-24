@@ -343,8 +343,6 @@ class Post_Views_Counter_Query {
 	/**
 	 * Order posts by post views.
 	 *
-	 * @global object $wpdb
-	 *
 	 * @param string $orderby
 	 * @param object $query
 	 * @return string
@@ -352,68 +350,26 @@ class Post_Views_Counter_Query {
 	public function posts_orderby( $orderby, $query ) {
 		// is it sorted by post views?
 		if ( ( isset( $query->pvc_orderby ) && $query->pvc_orderby ) ) {
-			global $wpdb;
-
 			// get order
-			$order = $query->get( 'order' );
-
-			// get original orderby (before parsing)
+			$order = strtoupper( (string) $query->get( 'order' ) );
 			$org_orderby = $query->get( 'orderby' );
 
-			// orderby as string
-			if ( is_string( $org_orderby ) ) {
-				if ( $org_orderby === 'post_views' )
-					$orderby = 'post_views ' . $order;
-				elseif ( strpos( $org_orderby, 'post_views' ) !== false ) {
-					// explode orderby
-					$sort = explode( ' ', $org_orderby );
+			if ( ! in_array( $order, [ 'ASC', 'DESC' ], true ) )
+				$order = 'DESC';
 
-					if ( ! empty( $sort ) ) {
-						// clear it
-						$sort = array_values( array_filter( $sort ) );
+			if ( is_array( $org_orderby ) && array_key_exists( 'post_views', $org_orderby ) ) {
+				$post_views_order = strtoupper( (string) $org_orderby['post_views'] );
 
-						// make sure only full string is available
-						if ( in_array( 'post_views', $sort, true ) ) {
-							// sort only by post views
-							if ( count( $sort ) === 1 )
-								$orderby = 'post_views ' . $order;
-							else {
-								// post_views as first value
-								if ( $sort[0] === 'post_views' )
-									$orderby = 'post_views ' . $order . ', ' . $orderby;
-								else {
-//todo find a way to recognize other sorting options based on original order and parsed order by wordpress
-									$orderby = 'post_views ' . $order . ', ' . $orderby;
-								}
-							}
-						}
-					}
-				}
-			// orderby as array
-			} elseif ( is_array( $org_orderby ) && array_key_exists( 'post_views', $org_orderby ) ) {
-				// sort only by post views
-				if ( count( $org_orderby ) === 1 )
-					$orderby = 'post_views ' . $order;
-				else {
-					// post_views as first key
-					if ( array_key_first( $org_orderby ) === 'post_views' ) {
-						$sanitized_orderby = sanitize_sql_orderby( 'post_views ' . strtoupper( $org_orderby['post_views'] ) );
-
-						if ( $sanitized_orderby !== false )
-							$orderby = $sanitized_orderby . ', ' . $orderby;
-						else
-							$orderby = 'post_views ' . $order . ', ' . $orderby;
-					} else {
-//todo find a way to recognize other sorting options based on original order and parsed order by wordpress
-						$sanitized_orderby = sanitize_sql_orderby( 'post_views ' . strtoupper( $org_orderby['post_views'] ) );
-
-						if ( $sanitized_orderby !== false )
-							$orderby = $sanitized_orderby . ', ' . $orderby;
-						else
-							$orderby = 'post_views ' . $order . ', ' . $orderby;
-					}
-				}
+				if ( in_array( $post_views_order, [ 'ASC', 'DESC' ], true ) )
+					$order = $post_views_order;
 			}
+
+			$post_views_orderby = 'post_views ' . $order;
+
+			if ( ! is_string( $orderby ) || trim( $orderby ) === '' )
+				$orderby = $post_views_orderby;
+			elseif ( preg_match( '/\bpost_views\b/i', $orderby ) !== 1 )
+				$orderby = $post_views_orderby . ', ' . $orderby;
 		}
 
 		return $orderby;

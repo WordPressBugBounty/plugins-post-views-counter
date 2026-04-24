@@ -15,11 +15,7 @@ class Post_Views_Counter_Counter {
 	private $queue = [];
 	private $queue_mode = false;
 	private $db_insert_values = '';
-	private $cookie = [
-		'exists'		 => false,
-		'visited_posts'	 => [],
-		'expiration'	 => 0
-	];
+	private $cookie = [];
 
 	/**
 	 * Class constructor.
@@ -200,15 +196,16 @@ class Post_Views_Counter_Counter {
 
 		// get user ip address
 		$user_ip = $this->get_user_ip();
+		$hook_content_data = $this->get_public_storage_hook_data( $content_data, 'post', $this->storage_type );
 
 		// before visit action
-		do_action( 'pvc_before_check_visit', $post_id, $user_id, $user_ip, 'post', $content_data );
+		do_action( 'pvc_before_check_visit', $post_id, $user_id, $user_ip, 'post', $hook_content_data );
 
 		// check all conditions to count visit
 		add_filter( 'pvc_count_conditions_met', [ $this, 'check_conditions' ], 10, 6 );
 
 		// check conditions - excluded ips, excluded groups
-		$conditions_met = apply_filters( 'pvc_count_conditions_met', true, $post_id, $user_id, $user_ip, 'post', $content_data );
+		$conditions_met = apply_filters( 'pvc_count_conditions_met', true, $post_id, $user_id, $user_ip, 'post', $hook_content_data );
 
 		// conditions failed?
 		if ( ! $conditions_met )
@@ -222,25 +219,19 @@ class Post_Views_Counter_Counter {
 			$count_visit = $this->save_data_storage( $post_id, 'post', $content_data );
 		} elseif ( $pvc->options['general']['data_storage'] === 'cookies' && $this->storage_type === 'cookies' ) {
 			// php counter mode?
-			if ( $pvc->options['general']['counter_mode'] === 'php' ) {
-				if ( $this->cookie['exists'] ) {
-					// update cookie
-					$count_visit = $this->save_cookie( $post_id, $this->cookie );
-				} else {
-					// set new cookie
-					$count_visit = $this->save_cookie( $post_id );
-				}
-			} else
+			if ( $pvc->options['general']['counter_mode'] === 'php' )
+				$count_visit = $this->save_cookie( $post_id, $this->cookie );
+			else
 				$count_visit = $this->save_cookie_storage( $post_id, $content_data );
 		}
 
 		// filter visit counting
-		$count_visit = (bool) apply_filters( 'pvc_count_visit', $count_visit, $post_id, $user_id, $user_ip, 'post', $content_data );
+		$count_visit = (bool) apply_filters( 'pvc_count_visit', $count_visit, $post_id, $user_id, $user_ip, 'post', $hook_content_data );
 
 		// count visit
 		if ( $count_visit ) {
 			// before count visit action
-			do_action( 'pvc_before_count_visit', $post_id, $user_id, $user_ip, 'post', $content_data );
+			do_action( 'pvc_before_count_visit', $post_id, $user_id, $user_ip, 'post', $hook_content_data );
 
 			return $this->count_visit( $post_id );
 		}
@@ -438,14 +429,12 @@ class Post_Views_Counter_Counter {
 		$this->storage_type = $storage_type;
 
 		// cookieless data storage?
-		if ( $storage_type === 'cookieless' && $pvc->options['general']['data_storage'] === 'cookieless' ) {
-			// sanitize storage data
-			$storage_data = $this->sanitize_storage_data( $_POST['storage_data'] );
+		if ( $storage_type === 'cookieless' && $pvc->options['general']['data_storage'] === 'cookieless' )
+			$storage_data = $this->sanitize_storage_payload_set( $_POST['storage_data'], 'post', 'cookieless', isset( $_POST['storage_data_all'] ) ? $_POST['storage_data_all'] : '' );
 		// cookies?
-		} elseif ( $storage_type === 'cookies' && $pvc->options['general']['data_storage'] === 'cookies' ) {
-			// sanitize cookies data
-			$storage_data = $this->sanitize_cookies_data( $_POST['storage_data'] );
-		} else
+		elseif ( $storage_type === 'cookies' && $pvc->options['general']['data_storage'] === 'cookies' )
+			$storage_data = $this->sanitize_storage_payload_set( $_POST['storage_data'], 'post', 'cookies', isset( $_POST['storage_data_all'] ) ? $_POST['storage_data_all'] : '' );
+		else
 			$storage_data = [];
 
 		echo wp_json_encode(
@@ -516,14 +505,12 @@ class Post_Views_Counter_Counter {
 		$this->storage_type = $storage_type;
 
 		// cookieless data storage?
-		if ( $storage_type === 'cookieless' && $pvc->options['general']['data_storage'] === 'cookieless' ) {
-			// sanitize storage data
-			$storage_data = $this->sanitize_storage_data( $request->get_param( 'storage_data' ) );
+		if ( $storage_type === 'cookieless' && $pvc->options['general']['data_storage'] === 'cookieless' )
+			$storage_data = $this->sanitize_storage_payload_set( $request->get_param( 'storage_data' ), 'post', 'cookieless', $request->get_param( 'storage_data_all' ) );
 		// cookies?
-		} elseif ( $storage_type === 'cookies' && $pvc->options['general']['data_storage'] === 'cookies' ) {
-			// sanitize cookies data
-			$storage_data = $this->sanitize_cookies_data( $request->get_param( 'storage_data' ) );
-		} else
+		elseif ( $storage_type === 'cookies' && $pvc->options['general']['data_storage'] === 'cookies' )
+			$storage_data = $this->sanitize_storage_payload_set( $request->get_param( 'storage_data' ), 'post', 'cookies', $request->get_param( 'storage_data_all' ) );
+		else
 			$storage_data = [];
 
 		return [
@@ -546,6 +533,8 @@ class Post_Views_Counter_Counter {
 		if ( is_admin() && ! wp_doing_ajax() )
 			return;
 
+		$this->cookie = $this->get_empty_storage_state();
+
 		if ( empty( $cookie ) || ! is_array( $cookie ) ) {
 			// assign cookie name
 			$cookie_name = 'pvc_visits' . ( is_multisite() ? '_' . get_current_blog_id() : '' );
@@ -556,30 +545,369 @@ class Post_Views_Counter_Counter {
 		}
 
 		// cookie data?
-		if ( $cookie && is_array( $cookie ) ) {
-			$visited_posts = $expirations = [];
+		if ( $cookie && is_array( $cookie ) )
+			$this->cookie = $this->sanitize_cookies_data( $this->combine_cookie_chunks( $cookie ), 'post' );
+	}
 
-			foreach ( $cookie as $content ) {
-				// is cookie valid?
-				if ( preg_match( '/^(([0-9]+b[0-9]+a?)+)$/', $content ) === 1 ) {
-					// get single id with expiration
-					$expiration_ids = explode( 'a', $content );
+	/**
+	 * Get empty normalized storage state.
+	 *
+	 * @return array
+	 */
+	public function get_empty_storage_state() {
+		return [
+			'format'		=> 'empty',
+			'version'		=> null,
+			'session_id'	=> null,
+			'started_at'	=> null,
+			'expires_at'	=> null,
+			'visited'		=> $this->get_empty_storage_buckets(),
+			'legacy'		=> [
+				'expirations' => $this->get_empty_storage_buckets()
+			],
+			'is_expired'	=> false,
+			'is_valid'		=> true,
+			'needs_writeback' => false
+		];
+	}
 
-					// check every expiration => id pair
-					foreach ( $expiration_ids as $pair ) {
-						$pair = explode( 'b', $pair );
-						$expirations[] = (int) $pair[0];
-						$visited_posts[(int) $pair[1]] = (int) $pair[0];
+	/**
+	 * Check whether normalized storage allows counting content.
+	 *
+	 * @param array $storage_state
+	 * @param int $content_id
+	 * @param string $content_type
+	 * @param int $current_time
+	 *
+	 * @return bool
+	 */
+	public function storage_state_allows_count( $storage_state, $content_id, $content_type = 'post', $current_time = 0 ) {
+		$content_type = $this->normalize_storage_bucket( $content_type );
+		$current_time = (int) ( $current_time > 0 ? $current_time : current_time( 'timestamp', true ) );
+
+		if ( ! $this->is_normalized_storage_state( $storage_state ) || ! $storage_state['is_valid'] )
+			return true;
+
+		if ( $storage_state['format'] === 'session' ) {
+			if ( ! $this->use_session_storage_payload_writes() )
+				return true;
+
+			if ( $storage_state['is_expired'] )
+				return true;
+
+			return ! isset( $storage_state['visited'][$content_type][(int) $content_id] );
+		}
+
+		$legacy_expirations = $this->get_storage_state_bucket_expirations( $storage_state, $content_type, $current_time );
+
+		return ! ( isset( $legacy_expirations[(int) $content_id] ) && $current_time < $legacy_expirations[(int) $content_id] );
+	}
+
+	/**
+	 * Get relevant legacy expirations for normalized storage state.
+	 *
+	 * @param array $storage_state
+	 * @param string $content_type
+	 * @param int $current_time
+	 *
+	 * @return array
+	 */
+	public function get_storage_state_bucket_expirations( $storage_state, $content_type = 'post', $current_time = 0 ) {
+		$content_type = $this->normalize_storage_bucket( $content_type );
+		$current_time = (int) ( $current_time > 0 ? $current_time : current_time( 'timestamp', true ) );
+
+		if ( ! $this->is_normalized_storage_state( $storage_state ) || ! $storage_state['is_valid'] )
+			return [];
+
+		if ( $storage_state['format'] === 'session' ) {
+			if ( $storage_state['is_expired'] || empty( $storage_state['visited'][$content_type] ) || empty( $storage_state['expires_at'] ) )
+				return [];
+
+			$expires_at = (int) $storage_state['expires_at'];
+
+			if ( $expires_at <= $current_time )
+				return [];
+
+			$expirations = [];
+
+			foreach ( array_keys( $storage_state['visited'][$content_type] ) as $bucket_content_id ) {
+				$expirations[(int) $bucket_content_id] = $expires_at;
+			}
+
+			return $expirations;
+		}
+
+		$expirations = [];
+
+		foreach ( $storage_state['legacy']['expirations'][$content_type] as $bucket_content_id => $expiration ) {
+			$bucket_content_id = (int) $bucket_content_id;
+			$expiration = (int) $expiration;
+
+			if ( $bucket_content_id > 0 && $expiration > $current_time )
+				$expirations[$bucket_content_id] = $expiration;
+		}
+
+		return $expirations;
+	}
+
+	/**
+	 * Get write expiration for normalized storage state.
+	 *
+	 * @param array $storage_state
+	 * @param int $default_expiration
+	 * @param int $current_time
+	 *
+	 * @return int
+	 */
+	public function get_storage_state_write_expiration( $storage_state, $default_expiration, $current_time = 0 ) {
+		$current_time = (int) ( $current_time > 0 ? $current_time : current_time( 'timestamp', true ) );
+		$default_expiration = (int) $default_expiration;
+
+		if ( ! $this->is_normalized_storage_state( $storage_state ) || ! $storage_state['is_valid'] )
+			return $default_expiration;
+
+		if ( $storage_state['format'] === 'session' ) {
+			$expires_at = (int) $storage_state['expires_at'];
+
+			if ( ! $storage_state['is_expired'] && $expires_at > $current_time )
+				return $expires_at;
+		}
+
+		return $default_expiration;
+	}
+
+	/**
+	 * Build canonical session payload for storage state.
+	 *
+	 * @param array $storage_state
+	 * @param int $content_id
+	 * @param string $content_type
+	 * @param int $default_expiration
+	 * @param int $current_time
+	 *
+	 * @return array
+	 */
+	public function build_session_storage_payload( $storage_state, $content_id = 0, $content_type = 'post', $default_expiration = 0, $current_time = 0 ) {
+		$session_state = $this->create_session_storage_state( $storage_state, $content_id, $content_type, $default_expiration, $current_time );
+
+		return $this->get_public_session_storage_payload( $session_state );
+	}
+
+	/**
+	 * Merge normalized storage states into one canonical state.
+	 *
+	 * @param array $storage_states
+	 * @param int $current_time
+	 *
+	 * @return array
+	 */
+	public function merge_storage_states( $storage_states, $current_time = 0 ) {
+		$current_time = (int) ( $current_time > 0 ? $current_time : current_time( 'timestamp', true ) );
+		$merged_state = $this->get_empty_storage_state();
+		$active_session = null;
+		$has_legacy_entries = false;
+
+		if ( ! is_array( $storage_states ) )
+			return $merged_state;
+
+		foreach ( $storage_states as $storage_state ) {
+			if ( ! $this->is_normalized_storage_state( $storage_state ) || ! $storage_state['is_valid'] )
+				continue;
+
+			if ( $storage_state['format'] === 'session' && ! $storage_state['is_expired'] && ! empty( $storage_state['session_id'] ) && ! empty( $storage_state['started_at'] ) && ! empty( $storage_state['expires_at'] ) ) {
+				if ( $active_session === null )
+					$active_session = $storage_state;
+
+				// merge all buckets from source state, including unregistered ones
+				foreach ( array_keys( $storage_state['visited'] ) as $bucket ) {
+					if ( ! isset( $merged_state['visited'][$bucket] ) ) {
+						$merged_state['visited'][$bucket] = [];
+						$merged_state['legacy']['expirations'][$bucket] = [];
+					}
+
+					foreach ( $storage_state['visited'][$bucket] as $bucket_content_id => $is_visited ) {
+						if ( $is_visited )
+							$merged_state['visited'][$bucket][(int) $bucket_content_id] = true;
 					}
 				}
 			}
 
-			// update cookie
-			$this->cookie = [
-				'exists'		 => true,
-				'visited_posts'	 => $visited_posts,
-				'expiration'	 => empty( $expirations ) ? 0 : max( $expirations )
-			];
+			foreach ( array_keys( $merged_state['legacy']['expirations'] ) as $bucket ) {
+				foreach ( $this->get_storage_state_bucket_expirations( $storage_state, $bucket, $current_time ) as $bucket_content_id => $expiration ) {
+					$bucket_content_id = (int) $bucket_content_id;
+					$expiration = (int) $expiration;
+
+					if ( $bucket_content_id <= 0 || $expiration <= $current_time )
+						continue;
+
+					$merged_state['legacy']['expirations'][$bucket][$bucket_content_id] = isset( $merged_state['legacy']['expirations'][$bucket][$bucket_content_id] ) ? max( $merged_state['legacy']['expirations'][$bucket][$bucket_content_id], $expiration ) : $expiration;
+					$merged_state['visited'][$bucket][$bucket_content_id] = true;
+					$has_legacy_entries = true;
+				}
+			}
+		}
+
+		if ( $active_session !== null ) {
+			$merged_state['format'] = 'session';
+			$merged_state['version'] = 1;
+			$merged_state['session_id'] = $active_session['session_id'];
+			$merged_state['started_at'] = (int) $active_session['started_at'];
+			$merged_state['expires_at'] = (int) $active_session['expires_at'];
+			$merged_state['is_valid'] = true;
+			$merged_state['is_expired'] = false;
+			$merged_state['needs_writeback'] = false;
+
+			return $merged_state;
+		}
+
+		if ( $has_legacy_entries ) {
+			$merged_state['format'] = 'legacy_map';
+			$merged_state['is_valid'] = true;
+		}
+
+		return $merged_state;
+	}
+
+	/**
+	 * Create normalized session storage state.
+	 *
+	 * @param array $storage_state
+	 * @param int $content_id
+	 * @param string $content_type
+	 * @param int $default_expiration
+	 * @param int $current_time
+	 *
+	 * @return array
+	 */
+	private function create_session_storage_state( $storage_state, $content_id = 0, $content_type = 'post', $default_expiration = 0, $current_time = 0 ) {
+		$content_type = $this->normalize_storage_bucket( $content_type );
+		$content_id = (int) $content_id;
+		$current_time = (int) ( $current_time > 0 ? $current_time : current_time( 'timestamp', true ) );
+		$default_expiration = (int) $default_expiration;
+		$seed_state = $this->merge_storage_states( [ $storage_state ], $current_time );
+
+		if ( $default_expiration < 0 )
+			$default_expiration = 0;
+
+		$session_expiration = $default_expiration > $current_time ? $default_expiration : $current_time;
+
+		if ( $seed_state['format'] === 'session' && ! $seed_state['is_expired'] && ! empty( $seed_state['session_id'] ) && ! empty( $seed_state['started_at'] ) && ! empty( $seed_state['expires_at'] ) )
+			$session_state = $seed_state;
+		else {
+			$session_state = $this->get_empty_storage_state();
+			$session_state['format'] = 'session';
+			$session_state['version'] = 1;
+			$session_state['session_id'] = $this->generate_session_storage_id();
+			$session_state['started_at'] = $current_time;
+			$session_state['expires_at'] = $session_expiration;
+
+			// new session created -- entrance/visit hook for the triggering content item
+			if ( $content_id > 0 ) {
+				/**
+				 * Fires when a new anonymous session is created.
+				 *
+				 * The content item that triggered the session is the entrance (landing page).
+				 * Listeners can use this to record per-content visit/entrance metrics.
+				 *
+				 * @param array  $session_state  Normalized session state (format, session_id, started_at, expires_at, visited).
+				 * @param int    $content_id      Content ID that triggered session creation.
+				 * @param string $content_type    Content bucket: 'post', 'term', 'user', 'other'.
+				 */
+				do_action( 'pvc_session_created', $session_state, $content_id, $content_type );
+			}
+		}
+
+		$session_state['format'] = 'session';
+		$session_state['version'] = 1;
+		$session_state['is_valid'] = true;
+		$session_state['is_expired'] = ( (int) $session_state['expires_at'] <= $current_time );
+		$session_state['needs_writeback'] = false;
+
+		if ( $content_id > 0 )
+			$session_state['visited'][$content_type][$content_id] = true;
+
+		return $session_state;
+	}
+
+	/**
+	 * Convert normalized session state to the public payload.
+	 *
+	 * @param array $storage_state
+	 *
+	 * @return array
+	 */
+	private function get_public_session_storage_payload( $storage_state ) {
+		if ( ! $this->is_normalized_storage_state( $storage_state ) || ! $storage_state['is_valid'] || $storage_state['format'] !== 'session' )
+			return [];
+
+		$payload = [
+			'version' => 1,
+			'session_id' => (string) $storage_state['session_id'],
+			'started_at' => (int) $storage_state['started_at'],
+			'expires_at' => (int) $storage_state['expires_at'],
+			'visited' => $this->get_empty_storage_buckets()
+		];
+
+		// emit all buckets present in state, including unregistered ones preserved by the tolerant reader
+		foreach ( array_keys( $storage_state['visited'] ) as $bucket ) {
+			if ( ! isset( $payload['visited'][$bucket] ) )
+				$payload['visited'][$bucket] = [];
+
+			$bucket_ids = array_map( 'intval', array_keys( $storage_state['visited'][$bucket] ) );
+			sort( $bucket_ids, SORT_NUMERIC );
+			$payload['visited'][$bucket] = $bucket_ids;
+		}
+
+		return $payload;
+	}
+
+	/**
+	 * Generate an anonymous session identifier.
+	 *
+	 * @return string
+	 */
+	private function generate_session_storage_id() {
+		if ( function_exists( 'wp_generate_uuid4' ) )
+			return wp_generate_uuid4();
+
+		return md5( uniqid( (string) wp_rand(), true ) );
+	}
+
+	/**
+	 * Clear stale cookie chunks that are no longer used by the current payload.
+	 *
+	 * @param string $cookie_name
+	 * @param int $valid_chunk_count
+	 * @param bool $php_at_least_73
+	 *
+	 * @return void
+	 */
+	private function clear_stale_cookie_chunks( $cookie_name, $valid_chunk_count, $php_at_least_73 ) {
+		if ( ! isset( $_COOKIE[$cookie_name] ) || ! is_array( $_COOKIE[$cookie_name] ) )
+			return;
+
+		foreach ( array_keys( $_COOKIE[$cookie_name] ) as $chunk_index ) {
+			$chunk_index = (int) $chunk_index;
+
+			if ( $chunk_index < $valid_chunk_count )
+				continue;
+
+			if ( $php_at_least_73 ) {
+				setcookie(
+					$cookie_name . '[' . $chunk_index . ']',
+					'',
+					[
+						'expires'	=> 1,
+						'path'		=> COOKIEPATH,
+						'domain'	=> COOKIE_DOMAIN,
+						'secure'	=> is_ssl(),
+						'httponly'	=> false,
+						'samesite'	=> 'LAX'
+					]
+				);
+			} else {
+				setcookie( $cookie_name . '[' . $chunk_index . ']', '', 1, COOKIEPATH, COOKIE_DOMAIN, is_ssl(), false );
+			}
 		}
 	}
 
@@ -587,58 +915,643 @@ class Post_Views_Counter_Counter {
 	 * Sanitize storage data.
 	 *
 	 * @param string $storage_data
+	 * @param string|null $content_type
 	 *
 	 * @return array
 	 */
-	public function sanitize_storage_data( $storage_data ) {
-		try {
-			// strip slashes
-			$storage_data = stripslashes( $storage_data );
+	public function sanitize_storage_data( $storage_data, $content_type = null ) {
+		$normalized_state = $this->normalize_storage_state( $storage_data, is_string( $content_type ) ? $content_type : 'post', 'auto' );
 
-			// decode storage data
-			$storage_data = json_decode( $storage_data, true, 2 );
-		} finally {
-			// valid data?
-			if ( json_last_error() === JSON_ERROR_NONE && is_array( $storage_data ) && ! empty( $storage_data ) ) {
-				$content_data = [];
+		if ( $content_type === null )
+			return $this->get_legacy_storage_data_result( $normalized_state );
 
-				foreach ( $storage_data as $content_id => $content_expiration ) {
-					$content_data[(int) $content_id] = (int) $content_expiration;
-				}
-
-				return array_unique( $content_data, SORT_NUMERIC );
-			} else
-				return [];
-		}
+		return $normalized_state;
 	}
 
 	/**
 	 * Sanitize cookies.
 	 *
 	 * @param string $storage_data
+	 * @param string|null $content_type
 	 *
 	 * @return array
 	 */
-	public function sanitize_cookies_data( $storage_data ) {
-		$content_data = $expirations = [];
+	public function sanitize_cookies_data( $storage_data, $content_type = null ) {
+		$normalized_state = $this->normalize_storage_state( $storage_data, is_string( $content_type ) ? $content_type : 'post', 'auto' );
 
-		// is cookie valid?
-		if ( preg_match( '/^(([0-9]+b[0-9]+a?)+)$/', $storage_data ) === 1 ) {
-			// get single id with expiration
-			$expiration_ids = explode( 'a', $storage_data );
+		if ( $content_type === null )
+			return $this->get_legacy_cookie_data_result( $normalized_state );
 
-			// check every expiration => id pair
-			foreach ( $expiration_ids as $pair ) {
-				$pair = explode( 'b', $pair );
-				$expirations[] = (int) $pair[0];
-				$content_data[(int) $pair[1]] = (int) $pair[0];
+		return $normalized_state;
+	}
+
+	/**
+	 * Sanitize and merge a set of storage payloads.
+	 *
+	 * @param mixed $storage_data
+	 * @param string $content_type
+	 * @param string $storage_type
+	 * @param mixed $storage_data_all
+	 *
+	 * @return array
+	 */
+	public function sanitize_storage_payload_set( $storage_data, $content_type, $storage_type, $storage_data_all = '' ) {
+		$content_type = $this->normalize_storage_bucket( $content_type );
+		$storage_payloads = $this->parse_storage_payload_map( $storage_data_all );
+
+		if ( empty( $storage_payloads ) ) {
+			if ( $storage_type === 'cookies' )
+				return $this->sanitize_cookies_data( $storage_data, $content_type );
+
+			return $this->sanitize_storage_data( $storage_data, $content_type );
+		}
+
+		if ( ! array_key_exists( $content_type, $storage_payloads ) && ( is_scalar( $storage_data ) || is_array( $storage_data ) ) )
+			$storage_payloads[$content_type] = $storage_data;
+
+		$storage_states = [];
+
+		foreach ( $storage_payloads as $bucket => $bucket_storage_data ) {
+			if ( $storage_type === 'cookies' )
+				$storage_states[] = $this->sanitize_cookies_data( $bucket_storage_data, $bucket );
+			else
+				$storage_states[] = $this->sanitize_storage_data( $bucket_storage_data, $bucket );
+		}
+
+		return $this->merge_storage_states( $storage_states );
+	}
+
+	/**
+	 * Parse a serialized map of storage payloads.
+	 *
+	 * @param mixed $storage_data_all
+	 *
+	 * @return array
+	 */
+	public function parse_storage_payload_map( $storage_data_all ) {
+		if ( is_scalar( $storage_data_all ) ) {
+			$storage_data_all = trim( (string) $storage_data_all );
+
+			if ( $storage_data_all === '' )
+				return [];
+
+			$decoded_payloads = json_decode( stripslashes( $storage_data_all ), true, 8 );
+
+			if ( json_last_error() !== JSON_ERROR_NONE || ! is_array( $decoded_payloads ) )
+				return [];
+		} elseif ( is_array( $storage_data_all ) )
+			$decoded_payloads = $storage_data_all;
+		else
+			return [];
+
+		$storage_payloads = [];
+
+		foreach ( array_keys( $this->get_empty_storage_buckets() ) as $bucket ) {
+			if ( isset( $decoded_payloads[$bucket] ) && ( is_scalar( $decoded_payloads[$bucket] ) || is_array( $decoded_payloads[$bucket] ) ) )
+				$storage_payloads[$bucket] = $decoded_payloads[$bucket];
+		}
+
+		return $storage_payloads;
+	}
+
+	/**
+	 * Check whether the active Pro plugin supports session payload writes.
+	 *
+	 * @return bool
+	 */
+	private function is_active_session_storage_payload_writes() {
+		if ( ! class_exists( 'Post_Views_Counter_Pro' ) )
+			return true;
+
+		if ( ! function_exists( 'Post_Views_Counter_Pro' ) )
+			return false;
+
+		$pro = Post_Views_Counter_Pro();
+
+		return ( is_object( $pro ) && method_exists( $pro, 'supports_session_storage_payload_writes' ) && $pro->supports_session_storage_payload_writes() );
+	}
+
+	/**
+	 * Check whether session payload writes are enabled.
+	 *
+	 * Session payload writes are the default for PVC-only installs. When Pro is active,
+	 * PVC uses Pro's explicit capability declaration and allows this filter to override
+	 * the computed default for controlled testing or emergency rollback.
+	 *
+	 * @return bool
+	 */
+	public function use_session_storage_payload_writes() {
+		return (bool) apply_filters( 'pvc_use_session_storage_payload_writes', $this->is_active_session_storage_payload_writes() );
+	}
+
+	/**
+	 * Build legacy expiration payload for a storage bucket.
+	 *
+	 * @param array $storage_state
+	 * @param int $content_id
+	 * @param string $content_type
+	 * @param int $default_expiration
+	 * @param int $current_time
+	 *
+	 * @return array
+	 */
+	public function build_legacy_storage_payload( $storage_state, $content_id = 0, $content_type = 'post', $default_expiration = 0, $current_time = 0 ) {
+		$content_type = $this->normalize_storage_bucket( $content_type );
+		$content_id = (int) $content_id;
+		$current_time = (int) ( $current_time > 0 ? $current_time : current_time( 'timestamp', true ) );
+		$rewriting_session_payload = ( $this->is_normalized_storage_state( $storage_state ) && $storage_state['format'] === 'session' && ! $this->use_session_storage_payload_writes() );
+		$bucket_expirations = [];
+
+		if ( ! $rewriting_session_payload )
+			$bucket_expirations = $this->get_storage_state_bucket_expirations( $storage_state, $content_type, $current_time );
+
+		$write_expiration = $rewriting_session_payload ? (int) $default_expiration : $this->get_storage_state_write_expiration( $storage_state, $default_expiration, $current_time );
+
+		if ( $content_id > 0 && $write_expiration > $current_time )
+			$bucket_expirations[$content_id] = $write_expiration;
+
+		ksort( $bucket_expirations, SORT_NUMERIC );
+
+		return $bucket_expirations;
+	}
+
+	/**
+	 * Build chunked legacy cookie payload data.
+	 *
+	 * @param array $storage_state
+	 * @param string $cookie_name
+	 * @param int $content_id
+	 * @param string $content_type
+	 * @param int $default_expiration
+	 * @param int $current_time
+	 *
+	 * @return array
+	 */
+	public function build_legacy_cookie_storage_data( $storage_state, $cookie_name, $content_id = 0, $content_type = 'post', $default_expiration = 0, $current_time = 0 ) {
+		$bucket_expirations = $this->build_legacy_storage_payload( $storage_state, $content_id, $content_type, $default_expiration, $current_time );
+		$payload = $this->serialize_legacy_cookie_payload( $bucket_expirations );
+
+		if ( $payload === '' ) {
+			return [
+				'name'		=> [ $cookie_name . '[0]' ],
+				'value'		=> [ '' ],
+				'expiry'	=> [ 1 ]
+			];
+		}
+
+		$cookies_data = [
+			'name'		=> [],
+			'value'		=> [],
+			'expiry'	=> []
+		];
+		$cookie_chunks = str_split( $payload, 3980 );
+		$cookie_expiration = max( $bucket_expirations );
+
+		foreach ( $cookie_chunks as $key => $value ) {
+			$cookies_data['name'][] = $cookie_name . '[' . $key . ']';
+			$cookies_data['value'][] = $value;
+			$cookies_data['expiry'][] = $cookie_expiration;
+		}
+
+		return $cookies_data;
+	}
+
+	/**
+	 * Get legacy-compatible cookieless storage data.
+	 *
+	 * @param array $storage_state
+	 *
+	 * @return array
+	 */
+	private function get_legacy_storage_data_result( $storage_state ) {
+		return $this->flatten_storage_state_expirations( $storage_state );
+	}
+
+	/**
+	 * Get legacy-compatible cookie data.
+	 *
+	 * @param array $storage_state
+	 *
+	 * @return array
+	 */
+	private function get_legacy_cookie_data_result( $storage_state ) {
+		$expirations = $this->flatten_storage_state_expirations( $storage_state );
+
+		return [
+			'visited'		=> $expirations,
+			'expiration'	=> empty( $expirations ) ? 0 : max( $expirations )
+		];
+	}
+
+	/**
+	 * Flatten normalized storage state to legacy expiration map.
+	 *
+	 * @param array $storage_state
+	 *
+	 * @return array
+	 */
+	private function flatten_storage_state_expirations( $storage_state ) {
+		$expirations = [];
+
+		if ( ! $this->is_normalized_storage_state( $storage_state ) || ! $storage_state['is_valid'] )
+			return $expirations;
+
+		foreach ( array_keys( $storage_state['legacy']['expirations'] ) as $bucket ) {
+			foreach ( $this->get_storage_state_bucket_expirations( $storage_state, $bucket ) as $content_id => $expiration ) {
+				$expirations[(int) $content_id] = (int) $expiration;
 			}
 		}
 
+		return $expirations;
+	}
+
+	/**
+	 * Get legacy-compatible hook payload for storage state.
+	 *
+	 * @param array $storage_state
+	 * @param string $content_type
+	 * @param string $storage_type
+	 *
+	 * @return array
+	 */
+	private function get_public_storage_hook_data( $storage_state, $content_type, $storage_type ) {
+		if ( ! $this->is_normalized_storage_state( $storage_state ) )
+			return $storage_state;
+
+		$bucket_expirations = $this->get_storage_state_bucket_expirations( $storage_state, $content_type );
+
+		if ( $storage_type === 'cookies' ) {
+			return [
+				'visited'		=> $bucket_expirations,
+				'expiration'	=> empty( $bucket_expirations ) ? 0 : max( $bucket_expirations )
+			];
+		}
+
+		return $bucket_expirations;
+	}
+
+	/**
+	 * Get legacy-compatible cookie filter payload.
+	 *
+	 * @param array $storage_state
+	 * @param string $content_type
+	 *
+	 * @return array
+	 */
+	private function get_public_cookie_filter_data( $storage_state, $content_type ) {
+		if ( ! $this->is_normalized_storage_state( $storage_state ) )
+			return $storage_state;
+
+		$bucket_expirations = $this->get_storage_state_bucket_expirations( $storage_state, $content_type );
+
+		if ( empty( $bucket_expirations ) )
+			return [];
+
 		return [
-			'visited'		=> array_unique( $content_data, SORT_NUMERIC ),
-			'expiration'	=> empty( $expirations ) ? 0 : max( $expirations )
+			'exists'		=> true,
+			'visited_posts'	=> $bucket_expirations,
+			'expiration'	=> max( $bucket_expirations )
 		];
+	}
+
+	/**
+	 * Serialize legacy cookie payload.
+	 *
+	 * @param array $bucket_expirations
+	 *
+	 * @return string
+	 */
+	private function serialize_legacy_cookie_payload( $bucket_expirations ) {
+		if ( empty( $bucket_expirations ) || ! is_array( $bucket_expirations ) )
+			return '';
+
+		ksort( $bucket_expirations, SORT_NUMERIC );
+
+		$segments = [];
+
+		foreach ( $bucket_expirations as $bucket_content_id => $expiration ) {
+			$bucket_content_id = (int) $bucket_content_id;
+			$expiration = (int) $expiration;
+
+			if ( $bucket_content_id > 0 && $expiration > 0 )
+				$segments[] = $expiration . 'b' . $bucket_content_id;
+		}
+
+		return implode( 'a', $segments );
+	}
+
+	/**
+	 * Reconstruct a cookie payload from chunks.
+	 *
+	 * Legacy chunked cookies need an "a" separator between chunks, while JSON payloads need a direct concat.
+	 *
+	 * @param array $cookie_chunks
+	 *
+	 * @return string
+	 */
+	private function combine_cookie_chunks( $cookie_chunks ) {
+		$chunks = [];
+
+		foreach ( $cookie_chunks as $chunk ) {
+			if ( is_scalar( $chunk ) )
+				$chunks[] = (string) $chunk;
+		}
+
+		if ( empty( $chunks ) )
+			return '';
+
+		$json_payload = implode( '', $chunks );
+
+		if ( $this->looks_like_json_storage( trim( $json_payload ) ) ) {
+			$json_data = json_decode( stripslashes( $json_payload ), true, 8 );
+
+			if ( json_last_error() === JSON_ERROR_NONE && is_array( $json_data ) && isset( $json_data['version'] ) )
+				return $json_payload;
+		}
+
+		return implode( 'a', $chunks );
+	}
+
+	/**
+	 * Normalize storage state.
+	 *
+	 * @param mixed $storage_data
+	 * @param string $content_type
+	 * @param string $format_hint
+	 *
+	 * @return array
+	 */
+	private function normalize_storage_state( $storage_data, $content_type = 'post', $format_hint = 'auto' ) {
+		$content_type = $this->normalize_storage_bucket( $content_type );
+		$state = $this->get_empty_storage_state();
+
+		if ( is_array( $storage_data ) )
+			return $this->normalize_json_storage_state( $storage_data, $content_type );
+
+		if ( ! is_scalar( $storage_data ) ) {
+			$state['format'] = 'invalid';
+			$state['is_valid'] = false;
+
+			return $state;
+		}
+
+		$storage_data = trim( (string) $storage_data );
+
+		if ( $storage_data === '' )
+			return $state;
+
+		if ( $format_hint !== 'legacy_cookie' && $this->looks_like_json_storage( $storage_data ) ) {
+			$json_storage = json_decode( stripslashes( $storage_data ), true, 8 );
+
+			if ( json_last_error() === JSON_ERROR_NONE && is_array( $json_storage ) )
+				return $this->normalize_json_storage_state( $json_storage, $content_type );
+		}
+
+		if ( $format_hint !== 'legacy_map' && preg_match( '/^(([0-9]+b[0-9]+a?)+)$/', $storage_data ) === 1 )
+			return $this->normalize_legacy_cookie_state( $storage_data, $content_type );
+
+		$state['format'] = 'invalid';
+		$state['is_valid'] = false;
+
+		return $state;
+	}
+
+	/**
+	 * Normalize decoded JSON storage state.
+	 *
+	 * @param array $storage_data
+	 * @param string $content_type
+	 *
+	 * @return array
+	 */
+	private function normalize_json_storage_state( $storage_data, $content_type ) {
+		if ( empty( $storage_data ) )
+			return $this->get_empty_storage_state();
+
+		if ( isset( $storage_data['version'] ) )
+			return $this->normalize_session_storage_state( $storage_data );
+
+		return $this->normalize_legacy_map_state( $storage_data, $content_type );
+	}
+
+	/**
+	 * Normalize session storage state.
+	 *
+	 * @param array $storage_data
+	 *
+	 * @return array
+	 */
+	private function normalize_session_storage_state( $storage_data ) {
+		$state = $this->get_empty_storage_state();
+		$state['format'] = 'session';
+		$state['version'] = isset( $storage_data['version'] ) ? (int) $storage_data['version'] : null;
+
+		if ( $state['version'] !== 1 ) {
+			$state['format'] = 'invalid';
+			$state['is_valid'] = false;
+
+			return $state;
+		}
+
+		$session_id = isset( $storage_data['session_id'] ) && is_scalar( $storage_data['session_id'] ) ? sanitize_text_field( wp_unslash( (string) $storage_data['session_id'] ) ) : '';
+		$started_at = isset( $storage_data['started_at'] ) ? (int) $storage_data['started_at'] : 0;
+		$expires_at = isset( $storage_data['expires_at'] ) ? (int) $storage_data['expires_at'] : 0;
+
+		if ( $session_id === '' || $started_at <= 0 || $expires_at <= 0 || $expires_at < $started_at || ! isset( $storage_data['visited'] ) || ! is_array( $storage_data['visited'] ) ) {
+			$state['format'] = 'invalid';
+			$state['is_valid'] = false;
+
+			return $state;
+		}
+
+		$state['session_id'] = $session_id;
+		$state['started_at'] = $started_at;
+		$state['expires_at'] = $expires_at;
+		$state['is_expired'] = current_time( 'timestamp', true ) >= $expires_at;
+
+		// populate registered buckets from payload
+		foreach ( array_keys( $state['visited'] ) as $bucket ) {
+			if ( isset( $storage_data['visited'][$bucket] ) )
+				$state['visited'][$bucket] = $this->normalize_session_bucket_membership( $storage_data['visited'][$bucket] );
+		}
+
+		// preserve unregistered buckets from payload (tolerant reader)
+		foreach ( $storage_data['visited'] as $bucket => $bucket_data ) {
+			if ( ! isset( $state['visited'][$bucket] ) && is_array( $bucket_data ) ) {
+				$bucket = sanitize_key( $bucket );
+
+				if ( $bucket !== '' ) {
+					$state['visited'][$bucket] = $this->normalize_session_bucket_membership( $bucket_data );
+					$state['legacy']['expirations'][$bucket] = [];
+				}
+			}
+		}
+
+		return $state;
+	}
+
+	/**
+	 * Normalize legacy map storage state.
+	 *
+	 * @param array $storage_data
+	 * @param string $content_type
+	 *
+	 * @return array
+	 */
+	private function normalize_legacy_map_state( $storage_data, $content_type ) {
+		$state = $this->get_empty_storage_state();
+		$valid_items = 0;
+		$state['format'] = 'legacy_map';
+
+		foreach ( $storage_data as $content_id => $expiration ) {
+			$content_id = (int) $content_id;
+			$expiration = (int) $expiration;
+
+			if ( $content_id <= 0 || $expiration <= 0 )
+				continue;
+
+			$state['visited'][$content_type][$content_id] = true;
+			$state['legacy']['expirations'][$content_type][$content_id] = $expiration;
+			$valid_items++;
+		}
+
+		if ( $valid_items === 0 ) {
+			$state['format'] = 'invalid';
+			$state['is_valid'] = false;
+		}
+
+		return $state;
+	}
+
+	/**
+	 * Normalize legacy cookie storage state.
+	 *
+	 * @param string $storage_data
+	 * @param string $content_type
+	 *
+	 * @return array
+	 */
+	private function normalize_legacy_cookie_state( $storage_data, $content_type ) {
+		$state = $this->get_empty_storage_state();
+		$state['format'] = 'legacy_cookie';
+
+		foreach ( explode( 'a', $storage_data ) as $pair ) {
+			$pair = explode( 'b', $pair );
+
+			if ( count( $pair ) !== 2 )
+				continue;
+
+			$expiration = (int) $pair[0];
+			$content_id = (int) $pair[1];
+
+			if ( $content_id <= 0 || $expiration <= 0 )
+				continue;
+
+			$state['visited'][$content_type][$content_id] = true;
+			$state['legacy']['expirations'][$content_type][$content_id] = $expiration;
+		}
+
+		if ( empty( $state['legacy']['expirations'][$content_type] ) ) {
+			$state['format'] = 'invalid';
+			$state['is_valid'] = false;
+		}
+
+		return $state;
+	}
+
+	/**
+	 * Normalize session bucket membership.
+	 *
+	 * @param array $bucket_data
+	 *
+	 * @return array
+	 */
+	private function normalize_session_bucket_membership( $bucket_data ) {
+		$members = [];
+
+		if ( ! is_array( $bucket_data ) )
+			return $members;
+
+		foreach ( $bucket_data as $key => $value ) {
+			$content_id = 0;
+
+			if ( is_int( $key ) )
+				$content_id = (int) $value;
+			else {
+				$content_id = (int) $key;
+
+				if ( $content_id <= 0 && is_scalar( $value ) )
+					$content_id = (int) $value;
+			}
+
+			if ( $content_id > 0 )
+				$members[$content_id] = true;
+		}
+
+		return $members;
+	}
+
+	/**
+	 * Check whether string looks like JSON storage.
+	 *
+	 * @param string $storage_data
+	 *
+	 * @return bool
+	 */
+	private function looks_like_json_storage( $storage_data ) {
+		return ( strlen( $storage_data ) > 1 && $storage_data[0] === '{' && substr( $storage_data, -1 ) === '}' );
+	}
+
+	/**
+	 * Check whether storage state is normalized.
+	 *
+	 * @param mixed $storage_state
+	 *
+	 * @return bool
+	 */
+	private function is_normalized_storage_state( $storage_state ) {
+		return ( is_array( $storage_state ) && isset( $storage_state['format'], $storage_state['visited'], $storage_state['legacy']['expirations'], $storage_state['is_valid'], $storage_state['is_expired'] ) );
+	}
+
+	/**
+	 * Get empty storage buckets.
+	 *
+	 * Filterable via pvc_storage_buckets so that extensions can register additional content-type buckets.
+	 * PVC free registers only 'post'. Additional buckets can be added by integrations.
+	 *
+	 * @return array
+	 */
+	public function get_empty_storage_buckets() {
+		$buckets = apply_filters( 'pvc_storage_buckets', [
+			'post' => []
+		] );
+
+		if ( ! is_array( $buckets ) || empty( $buckets ) )
+			return [ 'post' => [] ];
+
+		// ensure all bucket values are arrays
+		foreach ( $buckets as $key => $value ) {
+			if ( ! is_array( $value ) )
+				$buckets[$key] = [];
+		}
+
+		return $buckets;
+	}
+
+	/**
+	 * Normalize storage bucket name.
+	 *
+	 * Validates against the registered bucket list from get_empty_storage_buckets().
+	 *
+	 * @param string $content_type
+	 *
+	 * @return string
+	 */
+	public function normalize_storage_bucket( $content_type ) {
+		$content_type = sanitize_key( $content_type );
+		$registered_buckets = array_keys( $this->get_empty_storage_buckets() );
+
+		return in_array( $content_type, $registered_buckets, true ) ? $content_type : 'post';
 	}
 
 	/**
@@ -654,42 +1567,21 @@ class Post_Views_Counter_Counter {
 		// get base instance
 		$pvc = Post_Views_Counter();
 
-		// set default flag
-		$count_visit = true;
-
 		// get expiration
 		$expiration = $this->get_timestamp( $pvc->options['general']['time_between_counts']['type'], $pvc->options['general']['time_between_counts']['number'] );
+		$current_time = current_time( 'timestamp', true );
+		$count_visit = $this->storage_state_allows_count( $content_data, $content, $content_type, $current_time );
 
-		// is this a new cookie?
-		if ( empty( $content_data ) ) {
-			$storage = [
-				$content => $expiration
-			];
-		} else {
-			// get current gmt time
-			$current_time = current_time( 'timestamp', true );
+		if ( ! $count_visit ) {
+			$this->storage = [];
 
-			// post already viewed but not expired?
-			if ( in_array( $content, array_keys( $content_data ), true ) && $current_time < $content_data[$content] )
-				$count_visit = false;
-
-			// create copy for better foreach performance
-			$content_data_tmp = $content_data;
-
-			// check whether viewed id has expired - no need to keep it anymore
-			foreach ( $content_data_tmp as $content_id => $content_expiration ) {
-				if ( $current_time > $content_expiration )
-					unset( $content_data[$content_id] );
-			}
-
-			// add new id or change expiration date if id already exists
-			if ( $count_visit )
-				$content_data[$content] = $expiration;
-
-			$storage = $content_data;
+			return false;
 		}
 
-		$this->storage[$content_type] = $storage;
+		if ( $this->use_session_storage_payload_writes() )
+			$this->storage = $this->build_session_storage_payload( $content_data, $content, $content_type, $expiration, $current_time );
+		else
+			$this->storage = [ $content_type => $this->build_legacy_storage_payload( $content_data, $content, $content_type, $expiration, $current_time ) ];
 
 		return $count_visit;
 	}
@@ -711,92 +1603,47 @@ class Post_Views_Counter_Counter {
 		// get base instance
 		$pvc = Post_Views_Counter();
 
-		// set default flag
-		$count_visit = true;
-
 		// get expiration
 		$expiration = $this->get_timestamp( $pvc->options['general']['time_between_counts']['type'], $pvc->options['general']['time_between_counts']['number'] );
+		$current_time = current_time( 'timestamp', true );
+		$count_visit = $this->storage_state_allows_count( $content_data, $content, 'post', $current_time );
+
+		if ( ! $count_visit ) {
+			$this->storage = [];
+
+			return false;
+		}
 
 		// assign cookie name
 		$cookie_name = 'pvc_visits' . ( is_multisite() ? '_' . get_current_blog_id() : '' );
+
+		if ( ! $this->use_session_storage_payload_writes() ) {
+			$this->storage = $this->build_legacy_cookie_storage_data( $content_data, $cookie_name, $content, 'post', $expiration, $current_time );
+
+			return $count_visit;
+		}
+
+		$session_payload = $this->build_session_storage_payload( $content_data, $content, 'post', $expiration, $current_time );
+		$session_json = wp_json_encode( $session_payload );
+
+		if ( ! is_string( $session_json ) || $session_json === '' ) {
+			$this->storage = [];
+
+			return false;
+		}
 
 		$cookies_data = [
 			'name'		=> [],
 			'value'		=> [],
 			'expiry'	=> []
 		];
+		$cookie_chunks = str_split( $session_json, 3980 );
+		$cookie_expiration = (int) $session_payload['expires_at'];
 
-		// is this a new cookie?
-		if ( empty( $content_data['visited'] ) ) {
-			$cookies_data['name'][] = $cookie_name . '[0]';
-			$cookies_data['value'][] = $expiration . 'b' . $content;
-			$cookies_data['expiry'][] = $expiration;
-		} else {
-			// get current gmt time
-			$current_time = current_time( 'timestamp', true );
-
-			if ( in_array( $content, array_keys( $content_data['visited'] ), true ) && $current_time < $content_data['visited'][$content] ) {
-				$count_visit = false;
-			} else {
-				// add new id or change expiration date if id already exists
-				$content_data['visited'][$content] = $expiration;
-			}
-
-			// create copy for better foreach performance
-			$visited_expirations = $content_data['visited'];
-
-			// check whether viewed id has expired - no need to keep it in cookie (less size)
-			foreach ( $visited_expirations as $content_id => $content_expiration ) {
-				if ( $current_time > $content_expiration )
-					unset( $content_data['visited'][$content_id] );
-			}
-
-			// set new last expiration date if needed
-			$content_data['expiration'] = empty( $content_data['visited'] ) ? 0 : max( $content_data['visited'] );
-
-			$cookies = $imploded = [];
-
-			// create pairs
-			foreach ( $content_data['visited'] as $id => $exp ) {
-				$imploded[] = $exp . 'b' . $id;
-			}
-
-			// split cookie into chunks (3980 bytes to make sure it is safe for every browser)
-			$chunks = str_split( implode( 'a', $imploded ), 3980 );
-
-			// more then one chunk?
-			if ( count( $chunks ) > 1 ) {
-				$last_id = '';
-
-				foreach ( $chunks as $chunk_id => $chunk ) {
-					// new chunk
-					$chunk_c = $last_id . $chunk;
-
-					// is it full-length chunk?
-					if ( strlen( $chunk ) === 3980 ) {
-						// get last part
-						$last_part = strrchr( $chunk_c, 'a' );
-
-						// get last id
-						$last_id = substr( $last_part, 1 );
-
-						// add new full-lenght chunk
-						$cookies[$chunk_id] = substr( $chunk_c, 0, strlen( $chunk_c ) - strlen( $last_part ) );
-					} else {
-						// add last chunk
-						$cookies[$chunk_id] = $chunk_c;
-					}
-				}
-			} else {
-				// only one chunk
-				$cookies[] = $chunks[0];
-			}
-
-			foreach ( $cookies as $key => $value ) {
-				$cookies_data['name'][] = $cookie_name . '[' . $key . ']';
-				$cookies_data['value'][] = $value;
-				$cookies_data['expiry'][] = $content_data['expiration'];
-			}
+		foreach ( $cookie_chunks as $key => $value ) {
+			$cookies_data['name'][] = $cookie_name . '[' . $key . ']';
+			$cookies_data['value'][] = $value;
+			$cookies_data['expiry'][] = $cookie_expiration;
 		}
 
 		$this->storage = $cookies_data;
@@ -814,117 +1661,35 @@ class Post_Views_Counter_Counter {
 	 */
 	private function save_cookie( $id, $cookie = [] ) {
 		// early return?
-		if ( apply_filters( 'pvc_maybe_set_cookie', true, $id, 'post', $cookie ) !== true )
+		if ( apply_filters( 'pvc_maybe_set_cookie', true, $id, 'post', $this->get_public_cookie_filter_data( $cookie, 'post' ) ) !== true )
 			return;
 
 		// get main instance
 		$pvc = Post_Views_Counter();
 
-		// set default flag
-		$count_visit = true;
-
 		// get expiration
 		$expiration = $this->get_timestamp( $pvc->options['general']['time_between_counts']['type'], $pvc->options['general']['time_between_counts']['number'] );
+		$current_time = current_time( 'timestamp', true );
+		$count_visit = $this->storage_state_allows_count( $cookie, $id, 'post', $current_time );
+
+		if ( ! $count_visit )
+			return false;
 
 		// assign cookie name
 		$cookie_name = 'pvc_visits' . ( is_multisite() ? '_' . get_current_blog_id() : '' );
-
-		// check whether php version is at least 7.3
 		$php_at_least_73 = version_compare( phpversion(), '7.3', '>=' );
 
-		// is this a new cookie?
-		if ( empty( $cookie ) ) {
-			if ( $php_at_least_73 ) {
-				// set cookie
-				setcookie(
-					$cookie_name . '[0]',
-					$expiration . 'b' . $id,
-					[
-						'expires'	=> $expiration,
-						'path'		=> COOKIEPATH,
-						'domain'	=> COOKIE_DOMAIN,
-						'secure'	=> is_ssl(),
-						'httponly'	=> false,
-						'samesite'	=> 'LAX'
-					]
-				);
-			} else {
-				// set cookie
-				setcookie( $cookie_name . '[0]', $expiration . 'b' . $id, $expiration, COOKIEPATH, COOKIE_DOMAIN, is_ssl(), false );
-			}
+		if ( ! $this->use_session_storage_payload_writes() ) {
+			$legacy_payload = $this->serialize_legacy_cookie_payload( $this->build_legacy_storage_payload( $cookie, $id, 'post', $expiration, $current_time ) );
+			$cookies_data = $this->build_legacy_cookie_storage_data( $cookie, $cookie_name, $id, 'post', $expiration, $current_time );
 
-			if ( $this->queue_mode )
-				$this->check_cookie( [ 0 => $expiration . 'b' . $id ] );
-		} else {
-			// get current gmt time
-			$current_time = current_time( 'timestamp', true );
-
-			// post already viewed but not expired?
-			if ( in_array( $id, array_keys( $cookie['visited_posts'] ), true ) && $current_time < $cookie['visited_posts'][$id] )
-				$count_visit = false;
-			else {
-				// add new id or change expiration date if id already exists
-				$cookie['visited_posts'][$id] = $expiration;
-			}
-
-			// create copy for better foreach performance
-			$visited_posts_expirations = $cookie['visited_posts'];
-
-			// check whether viewed id has expired - no need to keep it in cookie (less size)
-			foreach ( $visited_posts_expirations as $post_id => $post_expiration ) {
-				if ( $current_time > $post_expiration )
-					unset( $cookie['visited_posts'][$post_id] );
-			}
-
-			// set new last expiration date if needed
-			$cookie['expiration'] = empty( $cookie['visited_posts'] ) ? 0 : max( $cookie['visited_posts'] );
-
-			$cookies = $imploded = [];
-
-			// create pairs
-			foreach ( $cookie['visited_posts'] as $id => $exp ) {
-				$imploded[] = $exp . 'b' . $id;
-			}
-
-			// split cookie into chunks (3980 bytes to make sure it is safe for every browser)
-			$chunks = str_split( implode( 'a', $imploded ), 3980 );
-
-			// more then one chunk?
-			if ( count( $chunks ) > 1 ) {
-				$last_id = '';
-
-				foreach ( $chunks as $chunk_id => $chunk ) {
-					// new chunk
-					$chunk_c = $last_id . $chunk;
-
-					// is it full-length chunk?
-					if ( strlen( $chunk ) === 3980 ) {
-						// get last part
-						$last_part = strrchr( $chunk_c, 'a' );
-
-						// get last id
-						$last_id = substr( $last_part, 1 );
-
-						// add new full-lenght chunk
-						$cookies[$chunk_id] = substr( $chunk_c, 0, strlen( $chunk_c ) - strlen( $last_part ) );
-					} else {
-						// add last chunk
-						$cookies[$chunk_id] = $chunk_c;
-					}
-				}
-			} else {
-				// only one chunk
-				$cookies[] = $chunks[0];
-			}
-
-			foreach ( $cookies as $key => $value ) {
+			foreach ( $cookies_data['name'] as $key => $cookie_chunk_name ) {
 				if ( $php_at_least_73 ) {
-					// set cookie
 					setcookie(
-						$cookie_name . '[' . $key . ']',
-						$value,
+						$cookie_chunk_name,
+						$cookies_data['value'][$key],
 						[
-							'expires'	=> $cookie['expiration'],
+							'expires'	=> $cookies_data['expiry'][$key],
 							'path'		=> COOKIEPATH,
 							'domain'	=> COOKIE_DOMAIN,
 							'secure'	=> is_ssl(),
@@ -933,14 +1698,51 @@ class Post_Views_Counter_Counter {
 						]
 					);
 				} else {
-					// set cookie
-					setcookie( $cookie_name . '[' . $key . ']', $value, $cookie['expiration'], COOKIEPATH, COOKIE_DOMAIN, is_ssl(), false );
+					setcookie( $cookie_chunk_name, $cookies_data['value'][$key], $cookies_data['expiry'][$key], COOKIEPATH, COOKIE_DOMAIN, is_ssl(), false );
 				}
 			}
 
+			$this->clear_stale_cookie_chunks( $cookie_name, count( $cookies_data['name'] ), $php_at_least_73 );
+
 			if ( $this->queue_mode )
-				$this->check_cookie( $cookies );
+				$this->cookie = $this->sanitize_cookies_data( $legacy_payload, 'post' );
+
+			return $count_visit;
 		}
+
+		$session_payload = $this->build_session_storage_payload( $cookie, $id, 'post', $expiration, $current_time );
+		$session_json = wp_json_encode( $session_payload );
+
+		if ( ! is_string( $session_json ) || $session_json === '' )
+			return false;
+
+		// check whether php version is at least 7.3
+		$cookie_chunks = str_split( $session_json, 3980 );
+		$cookie_expiration = (int) $session_payload['expires_at'];
+
+		foreach ( $cookie_chunks as $key => $value ) {
+			if ( $php_at_least_73 ) {
+				setcookie(
+					$cookie_name . '[' . $key . ']',
+					$value,
+					[
+						'expires'	=> $cookie_expiration,
+						'path'		=> COOKIEPATH,
+						'domain'	=> COOKIE_DOMAIN,
+						'secure'	=> is_ssl(),
+						'httponly'	=> false,
+						'samesite'	=> 'LAX'
+					]
+				);
+			} else {
+				setcookie( $cookie_name . '[' . $key . ']', $value, $cookie_expiration, COOKIEPATH, COOKIE_DOMAIN, is_ssl(), false );
+			}
+		}
+
+		$this->clear_stale_cookie_chunks( $cookie_name, count( $cookie_chunks ), $php_at_least_73 );
+
+		if ( $this->queue_mode )
+			$this->cookie = $this->sanitize_cookies_data( $session_json, 'post' );
 
 		return $count_visit;
 	}
@@ -1503,6 +2305,9 @@ class Post_Views_Counter_Counter {
 						'default'			 => 'cookies'
 					],
 					'storage_data'	=> [
+						'default'			 => ''
+					],
+					'storage_data_all' => [
 						'default'			 => ''
 					]
 				] )

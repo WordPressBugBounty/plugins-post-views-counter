@@ -167,6 +167,24 @@ class Post_Views_Counter_Update {
 			}
 		}
 
+		// update 1.7.10+ - normalize legacy count interval values to canonical hours
+		if ( version_compare( $current_db_version, '1.7.10', '<' ) ) {
+			$general = get_option( 'post_views_counter_settings_general', [] );
+
+			if ( ! is_array( $general ) )
+				$general = [];
+
+			$normalized_time_between_counts = $pvc->normalize_time_between_counts( isset( $general['time_between_counts'] ) ? $general['time_between_counts'] : null, $pvc->defaults['general']['time_between_counts'] );
+
+			if ( ! isset( $general['time_between_counts'] ) || $general['time_between_counts'] !== $normalized_time_between_counts ) {
+				$general['time_between_counts'] = $normalized_time_between_counts;
+
+				update_option( 'post_views_counter_settings_general', $general );
+			}
+
+			$pvc->options['general']['time_between_counts'] = $normalized_time_between_counts;
+		}
+
 		// move menu position setting to display tab
 		$this->migrate_menu_position_option();
 

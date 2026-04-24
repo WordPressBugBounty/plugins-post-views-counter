@@ -57,8 +57,8 @@ class Post_Views_Counter_Columns_Modal {
 		wp_enqueue_style( 'pvc-admin-columns', POST_VIEWS_COUNTER_URL . '/css/admin-columns.css', [], $pvc->defaults['version'] );
 		wp_enqueue_script( 'pvc-admin-columns', POST_VIEWS_COUNTER_URL . '/js/admin-columns.js', [ 'jquery', 'pvc-chartjs', 'pvc-micromodal' ], $pvc->defaults['version'], true );
 
-		// BACKWARD COMPAT: Register legacy handles for Pro 1.7.3 and earlier
-		// Pro checks for 'pvc-column-modal' handle; keep both registered
+		// BACKWARD COMPAT: Register legacy handles for version 1.7.3 and earlier
+		// Legacy checks for 'pvc-column-modal' handle; keep both registered
 		wp_register_style( 'pvc-column-modal', POST_VIEWS_COUNTER_URL . '/css/admin-columns.css', [], $pvc->defaults['version'] );
 		wp_register_script( 'pvc-column-modal', POST_VIEWS_COUNTER_URL . '/js/admin-columns.js', [ 'jquery', 'pvc-chartjs', 'pvc-micromodal' ], $pvc->defaults['version'], true );
 
