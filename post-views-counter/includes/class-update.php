@@ -187,6 +187,8 @@ class Post_Views_Counter_Update {
 
 		// move menu position setting to display tab
 		$this->migrate_menu_position_option();
+		$this->ensure_email_settings_option( $pvc );
+		$this->sync_email_summary_schedule( $pvc );
 
 		if ( isset( $_POST['post_view_counter_update'], $_POST['post_view_counter_number'] ) ) {
 			if ( $_POST['post_view_counter_number'] === 'update_1' ) {
@@ -221,6 +223,57 @@ class Post_Views_Counter_Update {
 		if ( ! get_option( 'post_views_counter_settings_integrations' ) ) {
 			add_option( 'post_views_counter_settings_integrations', $pvc->defaults['integrations'], null, false );
 		}
+	}
+
+	/**
+	 * Ensure email settings option exists and includes current defaults.
+	 *
+	 * @param Post_Views_Counter $pvc
+	 * @return array
+	 */
+	private function ensure_email_settings_option( $pvc ) {
+		$defaults = $pvc->get_default_emails_settings();
+		$settings = get_option( 'post_views_counter_settings_emails', false );
+
+		if ( false === $settings ) {
+			add_option( 'post_views_counter_settings_emails', $defaults, null, false );
+
+			return $defaults;
+		}
+
+		if ( ! is_array( $settings ) )
+			$settings = [];
+
+		$normalized = array_merge( $defaults, $settings );
+		$normalized['latest_status'] = array_merge(
+			isset( $defaults['latest_status'] ) && is_array( $defaults['latest_status'] ) ? $defaults['latest_status'] : [],
+			isset( $settings['latest_status'] ) && is_array( $settings['latest_status'] ) ? $settings['latest_status'] : []
+		);
+
+		if ( $normalized !== $settings )
+			update_option( 'post_views_counter_settings_emails', $normalized );
+
+		return $normalized;
+	}
+
+	/**
+	 * Sync the weekly email summary schedule during plugin upgrades.
+	 *
+	 * @param Post_Views_Counter $pvc
+	 * @return void
+	 */
+	private function sync_email_summary_schedule( $pvc ) {
+		if ( ! isset( $pvc->emails_scheduler ) || ! $pvc->emails_scheduler instanceof Post_Views_Counter_Emails_Scheduler )
+			return;
+
+		$settings = get_option( 'post_views_counter_settings_emails', [] );
+
+		if ( ! is_array( $settings ) )
+			$settings = [];
+
+		$settings = array_merge( $pvc->get_default_emails_settings(), $settings );
+
+		$pvc->emails_scheduler->maybe_schedule( $settings );
 	}
 
 	/**

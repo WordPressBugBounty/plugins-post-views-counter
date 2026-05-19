@@ -285,7 +285,7 @@ class Post_Views_Counter_Columns_Modal {
 							<div class="pvc-modal-insights">
                                 <div class="pvc-insight pvc-insight-lock pvc-modal-insights-empty">
                                     <span class="pvc-insight-text"><?php _e( 'More insights available', 'post-views-counter' ); ?></span>
-                                    <a href="https://postviewscounter.com/upgrade/?utm_source=post-views-counter-lite&utm_medium=link&utm_campaign=unlock-insights" target="_blank"><?php echo esc_html__( 'Upgrade to Pro to unlock it', 'post-views-counter' ); ?></a>
+									<a href="<?php echo esc_url( Post_Views_Counter()->get_postviewscounter_url( '/upgrade/', 'link', 'upgrade-to-pro', 'admin-column-modal-locked-insight-link', 'free' ) ); ?>" target="_blank"><?php echo esc_html__( 'Upgrade to Pro to unlock it', 'post-views-counter' ); ?></a>
                                 </div>
                             </div>
 						</div>

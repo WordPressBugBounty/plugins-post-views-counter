@@ -96,6 +96,29 @@ class Post_Views_Counter_Settings_API {
 	}
 
 	/**
+	 * Get resolved defaults for a settings group.
+	 *
+	 * Allows settings objects to provide dynamic defaults for a group,
+	 * such as the Emails recipient defaulting to the site admin email.
+	 *
+	 * @param string $setting_id
+	 * @return array
+	 */
+	private function get_setting_defaults( $setting_id ) {
+		$defaults = isset( $this->object->defaults[$setting_id] ) && is_array( $this->object->defaults[$setting_id] ) ? $this->object->defaults[$setting_id] : [];
+		$callback = 'get_default_' . str_replace( '-', '_', $setting_id ) . '_settings';
+
+		if ( is_object( $this->object ) && method_exists( $this->object, $callback ) ) {
+			$resolved_defaults = call_user_func( [ $this->object, $callback ] );
+
+			if ( is_array( $resolved_defaults ) )
+				return $resolved_defaults;
+		}
+
+		return $defaults;
+	}
+
+	/**
 	 * Load default scripts and styles.
 	 *
 	 * @return void
@@ -119,6 +142,62 @@ class Post_Views_Counter_Settings_API {
 		.nav-tab-wrapper a.nav-tab.nav-tab-disabled:hover {
 			cursor: not-allowed;
 		}' );
+
+		if ( $this->current_page_has_field_type( 'editor' ) )
+			wp_enqueue_editor();
+	}
+
+	/**
+	 * Determine whether the current settings view contains a given field type.
+	 *
+	 * @param string $field_type
+	 * @return bool
+	 */
+	private function current_page_has_field_type( $field_type ) {
+		if ( empty( $this->settings ) || empty( $this->pages ) || empty( $_GET['page'] ) )
+			return false;
+
+		$field_type = sanitize_key( $field_type );
+		$page_slug = sanitize_key( wp_unslash( $_GET['page'] ) );
+
+		if ( $field_type === '' || $page_slug === '' )
+			return false;
+
+		foreach ( $this->pages as $page_key => $page ) {
+			if ( empty( $page['menu_slug'] ) || sanitize_key( $page['menu_slug'] ) !== $page_slug )
+				continue;
+
+			$active_tab = '';
+
+			if ( ! empty( $page['tabs'] ) && is_array( $page['tabs'] ) ) {
+				reset( $page['tabs'] );
+				$active_tab = key( $page['tabs'] );
+
+				if ( ! empty( $_GET['tab'] ) ) {
+					$requested_tab = sanitize_key( wp_unslash( $_GET['tab'] ) );
+
+					if ( array_key_exists( $requested_tab, $page['tabs'] ) )
+						$active_tab = $requested_tab;
+				}
+			}
+
+			if ( empty( $this->settings[$page_key]['fields'] ) || ! is_array( $this->settings[$page_key]['fields'] ) )
+				return false;
+
+			foreach ( $this->settings[$page_key]['fields'] as $field ) {
+				if ( empty( $field['type'] ) || sanitize_key( $field['type'] ) !== $field_type )
+					continue;
+
+				if ( ! empty( $field['tab'] ) && $active_tab !== '' && $field['tab'] !== $active_tab )
+					continue;
+
+				return true;
+			}
+
+			return false;
+		}
+
+		return false;
 	}
 
 	/**
@@ -360,12 +439,13 @@ class Post_Views_Counter_Settings_API {
 
 		if ( $display_form ) {
 			$setting_hyphenated = str_replace( '_', '-', $setting );
+			$legacy_reset_class = 'reset_' . $setting;
 			echo '
 					<p class="submit">';
 
 			submit_button( '', 'primary save-' . $setting_hyphenated, 'save_' . $setting, false, [ 'id' => 'save-' . $setting_hyphenated ] );
 
-			submit_button( __( 'Reset to defaults', $this->domain ), 'outline reset-' . $setting_hyphenated, 'reset_' . $setting, false, [ 'id' => 'reset-' . $setting_hyphenated ] );
+			submit_button( __( 'Reset to defaults', $this->domain ), 'outline reset_pvc_settings ' . $legacy_reset_class . ' reset-' . $setting_hyphenated, 'reset_' . $setting, false, [ 'id' => 'reset-' . $setting_hyphenated ] );
 
 			echo '
 					</p>
@@ -513,6 +593,7 @@ class Post_Views_Counter_Settings_API {
 		// default lookup path
 		$value = null;
 		$default = null;
+		$setting_defaults = $this->get_setting_defaults( $setting_id );
 		$name = $setting_name . '[' . $field_key . ']';
 
 		// check for parent
@@ -528,8 +609,8 @@ class Post_Views_Counter_Settings_API {
 			}
 
 			// defaults
-			if ( isset( $this->object->defaults[$setting_id][$field['parent']][$field_key] ) ) {
-				$default = $this->object->defaults[$setting_id][$field['parent']][$field_key];
+			if ( isset( $setting_defaults[$field['parent']][$field_key] ) ) {
+				$default = $setting_defaults[$field['parent']][$field_key];
 			} elseif ( isset( $this->object->defaults[$field['parent']][$field_key] ) ) {
 				$default = $this->object->defaults[$field['parent']][$field_key];
 			}
@@ -541,8 +622,8 @@ class Post_Views_Counter_Settings_API {
 				if ( isset( $this->object->options[$setting_id][$field_key] ) )
 					$value = $this->object->options[$setting_id][$field_key];
 
-				if ( isset( $this->object->defaults[$setting_id][$field_key] ) )
-					$default = $this->object->defaults[$setting_id][$field_key];
+				if ( isset( $setting_defaults[$field_key] ) )
+					$default = $setting_defaults[$field_key];
 			} else {
 				// flat
 				if ( isset( $this->object->options[$setting_id][$field_key] ) ) {
@@ -552,8 +633,8 @@ class Post_Views_Counter_Settings_API {
 				}
 
 				// defaults
-				if ( isset( $this->object->defaults[$setting_id][$field_key] ) ) {
-					$default = $this->object->defaults[$setting_id][$field_key];
+				if ( isset( $setting_defaults[$field_key] ) ) {
+					$default = $setting_defaults[$field_key];
 				} elseif ( isset( $this->object->defaults[$field_key] ) ) {
 					$default = $this->object->defaults[$field_key];
 				}
@@ -585,7 +666,9 @@ class Post_Views_Counter_Settings_API {
 			'setting_id'		=> $setting_id,
 			'animation'			=> ! empty( $field['animation'] ) ? $field['animation'] : '',
 			'logic'				=> ! empty( $field['logic'] ) ? $field['logic'] : null,
-			'fallback_option'	=> ! empty( $field['fallback_option'] ) ? sanitize_key( $field['fallback_option'] ) : ''
+			'fallback_option'	=> ! empty( $field['fallback_option'] ) ? sanitize_key( $field['fallback_option'] ) : '',
+			'rows'				=> ! empty( $field['rows'] ) ? (int) $field['rows'] : 6,
+			'cols'				=> ! empty( $field['cols'] ) ? (int) $field['cols'] : 50
 			/*
 			after_field
 			before_field
@@ -796,6 +879,38 @@ class Post_Views_Counter_Settings_API {
 				$html .= call_user_func( $args['callback'], $args );
 				break;
 
+			case 'textarea':
+				$empty_disabled = empty( $args['disabled'] );
+				$rows = max( 2, (int) $args['rows'] );
+				$cols = max( 20, (int) $args['cols'] );
+
+				$html .= '<textarea id="' . esc_attr( $args['html_id'] ) . '"' . ( ! empty( $args['subclass'] ) ? ' class="' . esc_attr( $args['subclass'] ) . '"' : '' ) . ' name="' . esc_attr( $args['name'] ) . '" rows="' . esc_attr( $rows ) . '" cols="' . esc_attr( $cols ) . '" ' . disabled( $empty_disabled, false, false ) . '>' . esc_textarea( $args['value'] ) . '</textarea>';
+				break;
+
+			case 'editor':
+				$rows = max( 2, (int) $args['rows'] );
+				$editor_settings = ! empty( $args['editor_settings'] ) && is_array( $args['editor_settings'] ) ? $args['editor_settings'] : [];
+				$editor_settings = array_merge(
+					[
+						'textarea_name' => $args['name'],
+						'textarea_rows' => $rows,
+						'teeny' => true,
+						'media_buttons' => false,
+						'tinymce' => true,
+						'quicktags' => true
+					],
+					$editor_settings
+				);
+
+				$html .= ! empty( $args['prepend'] ) ? wp_kses_post( $args['prepend'] ) : '';
+
+				ob_start();
+				wp_editor( (string) $args['value'], $args['html_id'], $editor_settings );
+				$html .= ob_get_clean();
+
+				$html .= ! empty( $args['append'] ) ? wp_kses_post( $args['append'] ) : '';
+				break;
+
 			case 'info':
 				$html .= '<span' . ( ! empty( $args['subclass'] ) ? ' class="' . esc_attr( $args['subclass'] ) . '"' : '' ) . '>' . esc_html( $args['text'] ) . '</span>';
 				break;
@@ -900,6 +1015,14 @@ class Post_Views_Counter_Settings_API {
 				// do nothing
 				break;
 
+			case 'textarea':
+				$value = is_array( $value ) ? implode( "\n", array_map( 'sanitize_textarea_field', $value ) ) : sanitize_textarea_field( $value );
+				break;
+
+			case 'editor':
+				$value = is_array( $value ) ? '' : wp_kses_post( $value );
+				break;
+
 			case 'class':
 				$value = trim( $value );
 
@@ -935,7 +1058,9 @@ class Post_Views_Counter_Settings_API {
 	 */
 	public function validate_settings( $input ) {
 		// check capability
-		if ( ! current_user_can( 'manage_options' ) )
+		$capability = apply_filters( 'pvc_settings_capability', 'manage_options' );
+
+		if ( ! current_user_can( $capability ) )
 			return $input;
 
 		// check option page
@@ -981,15 +1106,20 @@ class Post_Views_Counter_Settings_API {
 		if ( empty( $setting_id ) )
 			return $input;
 
+		$is_update_request = isset( $_POST['action'] ) && sanitize_key( wp_unslash( $_POST['action'] ) ) === 'update';
+		$has_custom_submit_action = isset( $_POST['post_views_counter_import_views'] )
+			|| isset( $_POST['post_views_counter_analyse_views'] )
+			|| isset( $_POST['post_views_counter_reset_views'] );
+
 		// save settings
-		if ( isset( $_POST['save_' . $setting_name] ) ) {
+		if ( isset( $_POST['save_' . $setting_name] ) || ( $is_update_request && ! $has_custom_submit_action && ! isset( $_POST['reset_' . $setting_name] ) ) ) {
 			$input = $this->validate_input_settings( $setting_id, $setting_key, $input );
 
 			add_settings_error( $setting_name, 'settings_saved', __( 'Settings saved.', $this->domain ), 'updated' );
 		// reset settings
 		} elseif ( isset( $_POST['reset_' . $setting_name] ) ) {
 			// get default values
-			$input = $this->object->defaults[$setting_id];
+			$input = $this->get_setting_defaults( $setting_id );
 
 			// check custom reset functions
 			if ( ! empty( $this->settings[$setting_key]['fields'] ) ) {
@@ -1027,11 +1157,20 @@ class Post_Views_Counter_Settings_API {
 	 * @return array
 	 */
 	public function validate_input_settings( $setting_id, $setting_key, $input ) {
+		$setting_defaults = $this->get_setting_defaults( $setting_id );
+		$current_settings = $this->get_current_setting_values( $setting_id, $setting_key );
+
 		if ( ! empty( $this->settings[$setting_key]['fields'] ) ) {
 			foreach ( $this->settings[$setting_key]['fields'] as $field_id => $field ) {
 				// skip saving this field?
-				if ( ! empty( $field['skip_saving'] ) )
+				if ( ! empty( $field['skip_saving'] ) ) {
+					if ( array_key_exists( $field_id, $current_settings ) )
+						$input[$field_id] = $current_settings[$field_id];
+					else
+						unset( $input[$field_id] );
+
 					continue;
+				}
 
 				// skip invalid tab field if any
 				if ( ! empty( $field['tab'] ) && $field['tab'] !== $setting_id )
@@ -1044,19 +1183,19 @@ class Post_Views_Counter_Settings_API {
 						if ( $field['type'] === 'custom' )
 							$input = call_user_func( $field['validate'], $input, $field );
 						else
-							$input[$field_id] = isset( $input[$field_id] ) ? call_user_func( $field['validate'], $input[$field_id], $field ) : $this->object->defaults[$setting_id][$field_id];
+							$input[$field_id] = isset( $input[$field_id] ) ? call_user_func( $field['validate'], $input[$field_id], $field ) : $setting_defaults[$field_id];
 					} else
-						$input[$field_id] = $this->object->defaults[$setting_id][$field_id];
+						$input[$field_id] = $setting_defaults[$field_id];
 				} else {
 					// field data?
 					if ( isset( $input[$field_id] ) ) {
 						// make sure default value is available
 						if ( ! isset( $field['default'] ) )
-							$field['default'] = $this->object->defaults[$setting_id][$field_id];
+							$field['default'] = $setting_defaults[$field_id];
 
 						$input[$field_id] = $this->validate_field( $input[$field_id], $field['type'], $field );
 					} else
-						$input[$field_id] = $this->object->defaults[$setting_id][$field_id];
+						$input[$field_id] = $setting_defaults[$field_id];
 				}
 
 				// update input data
@@ -1068,6 +1207,30 @@ class Post_Views_Counter_Settings_API {
 		}
 
 		return $input;
+	}
+
+	/**
+	 * Get the currently stored values for a settings group.
+	 *
+	 * @param string $setting_id
+	 * @param string $setting_key
+	 * @return array
+	 */
+	private function get_current_setting_values( $setting_id, $setting_key ) {
+		if ( empty( $this->settings[$setting_key]['option_name'] ) )
+			return [];
+
+		$option_name = $this->settings[$setting_key]['option_name'];
+
+		if ( is_array( $option_name ) )
+			$option_name = isset( $option_name[$setting_id] ) ? $option_name[$setting_id] : '';
+
+		if ( ! is_string( $option_name ) || $option_name === '' )
+			return [];
+
+		$current_values = get_option( $option_name, [] );
+
+		return is_array( $current_values ) ? $current_values : [];
 	}
 
 	/**

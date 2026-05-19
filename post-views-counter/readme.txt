@@ -4,7 +4,7 @@ Tags: counter, postviews, statistics, analytics, pageviews
 Requires at least: 6.3.0
 Requires PHP: 7.0
 Tested up to: 7.0
-Stable tag: 1.7.10
+Stable tag: 1.7.11
 License: MIT License
 License URI: http://opensource.org/licenses/MIT
 
@@ -91,6 +91,9 @@ If you’ve purchased Post Views Counter Pro, your license includes one year of 
 2. screenshot-2.png
 
 == Changelog ==
+
+= 1.7.11 =
+* New: Weekly email summaries with scheduling, test send, and template-based rendering.
 
 = 1.7.10 =
 * New: Session-based counting migration with legacy compatibility.
@@ -470,5 +473,5 @@ Initial release
 
 == Upgrade Notice ==
 
-= 1.7.10 =
-Session counting migration and admin ordering fixes.
+= 1.7.11 =
+Adds weekly email summaries with scheduling, templates, and delivery controls, plus related settings

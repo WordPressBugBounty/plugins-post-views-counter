@@ -2,7 +2,7 @@
 /*
 Plugin Name: Post Views Counter
 Description: Post Views Counter allows you to collect and display how many times a post, page, or other content has been viewed in a simple, fast and reliable way.
-Version: 1.7.10
+Version: 1.7.11
 Author: dFactory
 Author URI: https://dfactory.co/
 Plugin URI: https://postviewscounter.com/
@@ -30,7 +30,7 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 	 * Post Views Counter final class.
 	 *
 	 * @class Post_Views_Counter
-	 * @version	1.7.10
+	 * @version	1.7.11
 	 */
 	final class Post_Views_Counter {
 
@@ -111,7 +111,38 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 			'integrations' => [
 				'integrations'			=> []
 			],
-			'version'	=> '1.7.10'
+			'emails' => [
+				'enabled'					=> true,
+				'recipient'				=> '',
+				'min_views_threshold'	=> 25,
+				'include_post_types'	=> [],
+				'max_top_items'			=> 5,
+				'include_period_trend'	=> true,
+				'include_traffic_signals' => true,
+				'send_empty_reports'	=> false,
+				'include_top_gainers_decliners' => false,
+				'include_author_summary' => false,
+				'include_source_summary' => false,
+				'enabled_frequencies'	=> [ 'weekly' ],
+				'email_subject_template'	=> '',
+				'email_body_template'	=> '',
+				'last_sent_at'			=> null,
+				'last_period_start'		=> null,
+				'last_period_end'		=> null,
+				'last_error'			=> null,
+				'latest_status'			=> [
+					'last_attempt_at'	=> null,
+					'last_success_at'	=> null,
+					'last_error'		=> null,
+					'recipient'		=> '',
+					'source'		=> '',
+					'is_test'		=> false,
+					'period_start'	=> null,
+					'period_end'		=> null
+				],
+				'schedule_version'		=> 1
+			],
+			'version'	=> '1.7.11'
 		];
 
 		// instances
@@ -119,6 +150,7 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 		public $crawler;
 		public $cron;
 		public $dashboard;
+		public $emails_scheduler;
 		public $frontend;
 		public $functions;
 		public $settings;
@@ -181,6 +213,7 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 					new Post_Views_Counter_Update();
 
 					self::$instance->settings = new Post_Views_Counter_Settings();
+					self::$instance->emails_scheduler = new Post_Views_Counter_Emails_Scheduler();
 					self::$instance->import = new Post_Views_Counter_Import();
 
 					new Post_Views_Counter_Admin();
@@ -236,6 +269,13 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 			include_once( POST_VIEWS_COUNTER_PATH . 'includes/class-settings-reports.php' );
 			include_once( POST_VIEWS_COUNTER_PATH . 'includes/class-integrations.php' );
 			include_once( POST_VIEWS_COUNTER_PATH . 'includes/class-settings-integrations.php' );
+			include_once( POST_VIEWS_COUNTER_PATH . 'includes/class-emails-template.php' );
+			include_once( POST_VIEWS_COUNTER_PATH . 'includes/class-settings-emails.php' );
+			include_once( POST_VIEWS_COUNTER_PATH . 'includes/class-emails-period.php' );
+			include_once( POST_VIEWS_COUNTER_PATH . 'includes/class-emails-query.php' );
+			include_once( POST_VIEWS_COUNTER_PATH . 'includes/class-emails.php' );
+			include_once( POST_VIEWS_COUNTER_PATH . 'includes/class-emails-mailer.php' );
+			include_once( POST_VIEWS_COUNTER_PATH . 'includes/class-emails-scheduler.php' );
 			include_once( POST_VIEWS_COUNTER_PATH . 'includes/class-settings-other.php' );
 			include_once( POST_VIEWS_COUNTER_PATH . 'includes/class-import.php' );
 			include_once( POST_VIEWS_COUNTER_PATH . 'includes/class-admin.php' );
@@ -254,6 +294,49 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 		}
 
 		/**
+		 * Initialize email template defaults from the template service.
+		 *
+		 * @return void
+		 */
+		private function initialize_email_template_defaults() {
+			if ( ! class_exists( 'Post_Views_Counter_Emails_Template' ) )
+				include_once( POST_VIEWS_COUNTER_PATH . 'includes/class-emails-template.php' );
+
+			$this->defaults['emails']['email_subject_template'] = Post_Views_Counter_Emails_Template::get_default_subject_template();
+			$this->defaults['emails']['email_body_template'] = Post_Views_Counter_Emails_Template::get_default_body_template();
+		}
+
+		/**
+		 * Normalize stored email settings with current defaults.
+		 *
+		 * @param mixed $stored_emails
+		 * @param bool $persist
+		 * @return array
+		 */
+		private function normalize_email_settings( $stored_emails, $persist = false ) {
+			$defaults = $this->get_default_emails_settings();
+			$stored_emails = is_array( $stored_emails ) ? $stored_emails : [];
+			$normalized = array_merge( $defaults, $stored_emails );
+			$normalized['latest_status'] = array_merge(
+				isset( $defaults['latest_status'] ) && is_array( $defaults['latest_status'] ) ? $defaults['latest_status'] : [],
+				isset( $stored_emails['latest_status'] ) && is_array( $stored_emails['latest_status'] ) ? $stored_emails['latest_status'] : []
+			);
+			$did_update_templates = false;
+
+			foreach ( [ 'email_subject_template', 'email_body_template' ] as $template_key ) {
+				if ( ! isset( $stored_emails[$template_key] ) || $stored_emails[$template_key] === '' ) {
+					$normalized[$template_key] = $defaults[$template_key];
+					$did_update_templates = true;
+				}
+			}
+
+			if ( $persist && $did_update_templates )
+				update_option( 'post_views_counter_settings_emails', $normalized );
+
+			return $normalized;
+		}
+
+		/**
 		 * Class constructor.
 		 *
 		 * @return void
@@ -261,13 +344,18 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 		private function __construct() {
 			// define plugin constants
 			$this->define_constants();
+			$this->initialize_email_template_defaults();
+
+			$stored_emails = get_option( 'post_views_counter_settings_emails', false );
+			$emails = $this->normalize_email_settings( $stored_emails, $stored_emails !== false );
 
 			// short init?
 			if ( defined( 'SHORTINIT' ) && SHORTINIT ) {
 				$this->options = [
 					'general'	 => array_merge( $this->defaults['general'], get_option( 'post_views_counter_settings_general', $this->defaults['general'] ) ),
 					'display'	 => array_merge( $this->defaults['display'], get_option( 'post_views_counter_settings_display', $this->defaults['display'] ) ),
-					'other'		=> array_merge( $this->defaults['other'], get_option( 'post_views_counter_settings_other', $this->defaults['other'] ) )
+					'other'		=> array_merge( $this->defaults['other'], get_option( 'post_views_counter_settings_other', $this->defaults['other'] ) ),
+					'emails'	=> $emails
 				];
 
 				$this->options['general']['time_between_counts'] = $this->normalize_time_between_counts( isset( $this->options['general']['time_between_counts'] ) ? $this->options['general']['time_between_counts'] : null );
@@ -293,7 +381,8 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 				'general'		=> array_merge( $this->defaults['general'], get_option( 'post_views_counter_settings_general', $this->defaults['general'] ) ),
 				'display'		=> array_merge( $this->defaults['display'], get_option( 'post_views_counter_settings_display', $this->defaults['display'] ) ),
 				'other'			=> array_merge( $this->defaults['other'], get_option( 'post_views_counter_settings_other', $this->defaults['other'] ) ),
-				'integrations'	=> array_merge( $this->defaults['integrations'], get_option( 'post_views_counter_settings_integrations', $this->defaults['integrations'] ) )
+				'integrations'	=> array_merge( $this->defaults['integrations'], get_option( 'post_views_counter_settings_integrations', $this->defaults['integrations'] ) ),
+				'emails'		=> $emails
 			];
 
 			$this->options['general']['time_between_counts'] = $this->normalize_time_between_counts( isset( $this->options['general']['time_between_counts'] ) ? $this->options['general']['time_between_counts'] : null );
@@ -408,6 +497,7 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 				'postTypesKeys'	=> array_combine( array_keys( $post_types ), array_fill( 0, count( $post_types ), false ) ),
 				'postTypes'		=> $post_types,
 				'imageSizes'	=> $block_image_sizes,
+				'upgradeUrl'	=> $this->get_postviewscounter_url( '/upgrade/', 'link', 'upgrade-to-pro', 'block-editor-pro-placeholder-link', 'free' ),
 				'isProActive'	=> class_exists( 'Post_Views_Counter_Pro' )
 			];
 
@@ -423,6 +513,105 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 			$script_data = apply_filters( 'pvc_block_editor_data', $script_data );
 
 			wp_add_inline_script( 'post-views-counter-block-editor-script', 'var pvcBlockEditorData = ' . wp_json_encode( $script_data ) . ";\n", 'before' );
+		}
+
+		/**
+		 * Add deterministic UTM parameters to postviewscounter.com URLs.
+		 *
+		 * @param string $url
+		 * @param string $medium
+		 * @param string $campaign
+		 * @param string $content
+		 * @param string $context
+		 *
+		 * @return string
+		 */
+		public function add_postviewscounter_utm_args( $url, $medium = 'link', $campaign = 'general', $content = 'general', $context = 'free' ) {
+			$url = esc_url_raw( $url );
+
+			if ( $url === '' )
+				return '';
+
+			$host = wp_parse_url( $url, PHP_URL_HOST );
+
+			if ( ! is_string( $host ) )
+				return $url;
+
+			$host = strtolower( rtrim( $host, '.' ) );
+
+			if ( ! preg_match( '/(^|\.)postviewscounter\.com$/', $host ) )
+				return $url;
+
+			$allowed_mediums = [ 'button', 'link', 'email' ];
+			$allowed_contexts = [ 'free', 'pro-expired', 'pro-active' ];
+
+			$medium = sanitize_key( $medium );
+			$campaign = sanitize_key( $campaign );
+			$content = sanitize_key( $content );
+			$context = sanitize_key( $context );
+
+			if ( ! in_array( $medium, $allowed_mediums, true ) )
+				$medium = 'link';
+
+			if ( $campaign === '' )
+				$campaign = 'general';
+
+			if ( $content === '' )
+				$content = 'general';
+
+			if ( ! in_array( $context, $allowed_contexts, true ) )
+				$context = 'free';
+
+			$version = ! empty( $this->defaults['version'] ) ? (string) $this->defaults['version'] : (string) get_option( 'post_views_counter_version', '' );
+
+			$query_args = [
+				'utm_source' => 'post-views-counter-lite',
+				'utm_medium' => $medium,
+				'utm_campaign' => $campaign,
+				'utm_content' => $content,
+				'utm_context' => $context
+			];
+
+			if ( $version !== '' )
+				$query_args['utm_version'] = sanitize_text_field( $version );
+
+			return add_query_arg( $query_args, $url );
+		}
+
+		/**
+		 * Get a postviewscounter.com URL with deterministic UTM parameters.
+		 *
+		 * @param string $path
+		 * @param string $medium
+		 * @param string $campaign
+		 * @param string $content
+		 * @param string $context
+		 *
+		 * @return string
+		 */
+		public function get_postviewscounter_url( $path = '/', $medium = 'link', $campaign = 'general', $content = 'general', $context = 'free' ) {
+			if ( ! is_string( $path ) || $path === '' )
+				$path = '/';
+			elseif ( preg_match( '#^https?://#i', $path ) ) {
+				$parsed_path = wp_parse_url( $path, PHP_URL_PATH );
+				$parsed_query = wp_parse_url( $path, PHP_URL_QUERY );
+				$parsed_fragment = wp_parse_url( $path, PHP_URL_FRAGMENT );
+
+				$path = is_string( $parsed_path ) && $parsed_path !== '' ? $parsed_path : '/';
+
+				if ( is_string( $parsed_query ) && $parsed_query !== '' )
+					$path .= '?' . $parsed_query;
+
+				if ( is_string( $parsed_fragment ) && $parsed_fragment !== '' )
+					$path .= '#' . $parsed_fragment;
+			}
+
+			if ( $path === '/' )
+				$url = 'https://postviewscounter.com/';
+			else
+				$url = 'https://postviewscounter.com/' . ltrim( $path, '/' );
+
+			return $this->add_postviewscounter_utm_args( $url, $medium, $campaign, $content, $context );
 		}
 
 		/**
@@ -570,8 +759,11 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 					update_option( 'post_views_counter_settings_general', $this->options['general'] );
 				}
 
-				if ( ( ! empty( $this->options['general']['update_delay_date'] ) ? (int) $this->options['general']['update_delay_date'] : $current_time ) <= $current_time )
-					$this->add_notice( sprintf( __( "Hey, you've been using <strong>Post Views Counter</strong> for more than %s.", 'post-views-counter' ), human_time_diff( $activation_date, $current_time ) ) . '<br />' . __( 'Could you please do me a BIG favor and give it a 5-star rating on WordPress to help us spread the word and boost our motivation.', 'post-views-counter' ) . '<br /><br />' . __( 'Your help is much appreciated. Thank you very much', 'post-views-counter' ) . ' ~ <strong>Bartosz Arendt</strong>, ' . __( 'founder of', 'post-views-counter' ) . ' <a href="https://postviewscounter.com/" target="_blank">Post Views Counter</a>.' . '<br /><br />' . '<a href="https://wordpress.org/support/plugin/post-views-counter/reviews/?filter=5#new-post" class="pvc-dismissible-notice" target="_blank" rel="noopener">' . __( 'Ok, you deserve it', 'post-views-counter' ) . '</a><br /><a href="#" class="pvc-dismissible-notice pvc-delay-notice" rel="noopener">' . __( 'Nope, maybe later', 'post-views-counter' ) . '</a><br /><a href="#" class="pvc-dismissible-notice" rel="noopener">' . __( 'I already did', 'post-views-counter' ) . '</a>', 'notice notice-info is-dismissible pvc-notice' );
+				if ( ( ! empty( $this->options['general']['update_delay_date'] ) ? (int) $this->options['general']['update_delay_date'] : $current_time ) <= $current_time ) {
+					$review_notice_brand_url = esc_url( $this->get_postviewscounter_url( '/', 'link', 'review-notice', 'review-notice-brand-link', 'free' ) );
+
+					$this->add_notice( sprintf( __( "Hey, you've been using <strong>Post Views Counter</strong> for more than %s.", 'post-views-counter' ), human_time_diff( $activation_date, $current_time ) ) . '<br />' . __( 'Could you please do me a BIG favor and give it a 5-star rating on WordPress to help us spread the word and boost our motivation.', 'post-views-counter' ) . '<br /><br />' . __( 'Your help is much appreciated. Thank you very much', 'post-views-counter' ) . ' ~ <strong>Bartosz Arendt</strong>, ' . __( 'founder of', 'post-views-counter' ) . ' <a href="' . $review_notice_brand_url . '" target="_blank">Post Views Counter</a>.' . '<br /><br />' . '<a href="https://wordpress.org/support/plugin/post-views-counter/reviews/?filter=5#new-post" class="pvc-dismissible-notice" target="_blank" rel="noopener">' . __( 'Ok, you deserve it', 'post-views-counter' ) . '</a><br /><a href="#" class="pvc-dismissible-notice pvc-delay-notice" rel="noopener">' . __( 'Nope, maybe later', 'post-views-counter' ) . '</a><br /><a href="#" class="pvc-dismissible-notice" rel="noopener">' . __( 'I already did', 'post-views-counter' ) . '</a>', 'notice notice-info is-dismissible pvc-notice' );
+				}
 			}
 		}
 
@@ -780,7 +972,26 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 			add_option( 'post_views_counter_settings_general', $this->defaults['general'], null, false );
 			add_option( 'post_views_counter_settings_display', $this->defaults['display'], null, false );
 			add_option( 'post_views_counter_settings_other', $this->defaults['other'], null, false );
+			add_option( 'post_views_counter_settings_emails', $this->get_default_emails_settings(), null, false );
 			add_option( 'post_views_counter_version', $this->defaults['version'], null, false );
+
+			if ( $this->emails_scheduler instanceof Post_Views_Counter_Emails_Scheduler )
+				$this->emails_scheduler->maybe_schedule( get_option( 'post_views_counter_settings_emails', $this->get_default_emails_settings() ) );
+		}
+
+		/**
+		 * Get emails defaults for new option creation.
+		 *
+		 * @return array
+		 */
+		public function get_default_emails_settings() {
+			$defaults = $this->defaults['emails'];
+			$admin_email = get_option( 'admin_email' );
+
+			if ( is_email( $admin_email ) )
+				$defaults['recipient'] = $admin_email;
+
+			return $defaults;
 		}
 
 		/**
@@ -823,6 +1034,11 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 		 * @return void
 		 */
 		public function deactivate_site( $multi = false ) {
+			if ( $this->emails_scheduler instanceof Post_Views_Counter_Emails_Scheduler )
+				$this->emails_scheduler->clear();
+			else
+				wp_clear_scheduled_hook( 'pvc_weekly_content_summary_send' );
+
 			if ( $multi === true ) {
 				$options = get_option( 'post_views_counter_settings_other' );
 				$check = $options['deactivation_delete'];
@@ -835,6 +1051,7 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 				delete_option( 'post_views_counter_settings_general' );
 				delete_option( 'post_views_counter_settings_display' );
 				delete_option( 'post_views_counter_settings_other' );
+				delete_option( 'post_views_counter_settings_emails' );
 				delete_option( 'post_views_counter_activation_date' );
 				delete_option( 'post_views_counter_version' );
 
@@ -921,7 +1138,11 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 				$script_data = [
 					'resetToDefaults'	=> esc_html__( 'Are you sure you want to reset these settings to defaults?', 'post-views-counter' ),
 					'resetViews'		=> esc_html__( 'Are you sure you want to delete all existing data?', 'post-views-counter' ),
-					'importViews'		=> esc_html__( 'Are you sure you want to import views now?', 'post-views-counter' )
+					'importViews'		=> esc_html__( 'Are you sure you want to import views now?', 'post-views-counter' ),
+					'testEmail'			=> [
+						'invalidResponse' => esc_html__( 'The test email request did not return a valid response.', 'post-views-counter' ),
+						'unexpectedError' => esc_html__( 'The test email request could not be completed. Please try again.', 'post-views-counter' )
+					]
 				];
 
 				wp_add_inline_script( 'pvc-admin-settings', 'var pvcArgsSettings = ' . wp_json_encode( $script_data ) . ";\n", 'before' );

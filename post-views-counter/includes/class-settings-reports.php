@@ -58,7 +58,7 @@ class Post_Views_Counter_Settings_Reports {
 						<p>' . esc_html__( 'View detailed stats about the popularity of your content.', 'post-views-counter' ) . '</p>
 						<p>' . esc_html__( 'Generate views reports in any date range you need.', 'post-views-counter' ) . '</p>
 						<p>' . esc_html__( 'Export, download and share your website views data.', 'post-views-counter' ) . '</p>
-						<p><a href="https://postviewscounter.com/upgrade/?utm_source=post-views-counter-lite&utm_medium=button&utm_campaign=upgrade-to-pro" class="button button-secondary button-hero pvc-button" target="_blank">' . esc_html__( 'Upgrade to Pro', 'post-views-counter' ) . '</a></p>
+						<p><a href="' . esc_url( $this->pvc->get_postviewscounter_url( '/upgrade/', 'button', 'upgrade-to-pro', 'reports-placeholder-upgrade-button', 'free' ) ) . '" class="button button-secondary button-hero pvc-button" target="_blank">' . esc_html__( 'Upgrade to Pro', 'post-views-counter' ) . '</a></p>
 					</div>
 				</div>
 			</div>

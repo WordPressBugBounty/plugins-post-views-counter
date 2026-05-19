@@ -2,7 +2,7 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: Post Views Counter\n"
-"POT-Creation-Date: 2026-03-23 20:10+0100\n"
+"POT-Creation-Date: 2026-05-19 22:31+0200\n"
 "PO-Revision-Date: 2015-04-08 18:59+0100\n"
 "Last-Translator: Bartosz Arendt <info@dfactory.eu>\n"
 "Language-Team: dFactory <info@dfactory.eu>\n"
@@ -25,7 +25,7 @@ msgid "Something went wrong. Try again or refresh the page."
 msgstr ""
 
 #: blocks/most-viewed-posts/index.js:1 blocks/post-views/index.js:1
-#: post-views-counter.php:1037 src/blocks/most-viewed-posts/edit.js:40
+#: post-views-counter.php:1312 src/blocks/most-viewed-posts/edit.js:40
 #: src/blocks/post-views/edit.js:14
 msgid "Settings"
 msgstr ""
@@ -120,11 +120,11 @@ msgstr ""
 msgid "Enter 0 to use current visited post."
 msgstr ""
 
-#: blocks/pro-placeholder/index.js:1 src/blocks/pro-placeholder/index.js:41
+#: blocks/pro-placeholder/index.js:1 src/blocks/pro-placeholder/index.js:47
 msgid "This block requires Post Views Counter Pro."
 msgstr ""
 
-#: blocks/pro-placeholder/index.js:1 src/blocks/pro-placeholder/index.js:51
+#: blocks/pro-placeholder/index.js:1 src/blocks/pro-placeholder/index.js:57
 msgid "Learn More"
 msgstr ""
 
@@ -134,14 +134,14 @@ msgid "You are not allowed to edit this item."
 msgstr ""
 
 #: includes/class-admin.php:108 includes/class-columns-modal.php:101
-#: includes/class-counter.php:486
+#: includes/class-counter.php:475
 msgid "Invalid post ID."
 msgstr ""
 
 #: includes/class-admin.php:172 includes/class-columns.php:59
 #: includes/class-columns.php:255 includes/class-columns.php:350
 #: includes/class-dashboard.php:61 includes/class-dashboard.php:106
-#: includes/class-settings.php:597
+#: includes/class-settings.php:633
 msgid "Post Views"
 msgstr ""
 
@@ -173,7 +173,7 @@ msgstr ""
 msgid "view"
 msgstr ""
 
-#: includes/class-columns-modal.php:75
+#: includes/class-columns-modal.php:75 includes/class-emails-template.php:1610
 msgid "views"
 msgstr ""
 
@@ -217,7 +217,7 @@ msgstr ""
 msgid "Upgrade to Pro to unlock it"
 msgstr ""
 
-#: includes/class-columns.php:71 includes/class-dashboard.php:512
+#: includes/class-columns.php:71 includes/class-dashboard.php:529
 msgid "Edit"
 msgstr ""
 
@@ -225,23 +225,23 @@ msgstr ""
 msgid "OK"
 msgstr ""
 
-#: includes/class-columns.php:290 includes/class-dashboard.php:505
+#: includes/class-columns.php:290 includes/class-dashboard.php:522
 msgid "(no title)"
 msgstr ""
 
-#: includes/class-counter.php:479
+#: includes/class-counter.php:468
 msgid "REST API method is disabled."
 msgstr ""
 
-#: includes/class-counter.php:493
+#: includes/class-counter.php:482
 msgid "Post type excluded."
 msgstr ""
 
-#: includes/class-counter.php:500
+#: includes/class-counter.php:489
 msgid "Invalid storage type."
 msgstr ""
 
-#: includes/class-counter.php:1573
+#: includes/class-counter.php:2378
 msgid "You do not have permission to count post views via REST API."
 msgstr ""
 
@@ -269,31 +269,195 @@ msgstr ""
 msgid "Displays a list of most viewed single posts or pages."
 msgstr ""
 
-#: includes/class-dashboard.php:190
+#: includes/class-dashboard.php:196
+msgid "More Insights"
+msgstr ""
+
+#: includes/class-dashboard.php:198
+msgid "Go beyond basic post views."
+msgstr ""
+
+#: includes/class-dashboard.php:199
+msgid "See site views, referrers, popular searches, top users, and more."
+msgstr ""
+
+#: includes/class-dashboard.php:201
+msgid "Unlock more insights"
+msgstr ""
+
+#: includes/class-dashboard.php:207
 msgid "Powered by"
 msgstr ""
 
-#: includes/class-dashboard.php:258 includes/class-dashboard.php:414
-#: includes/class-dashboard.php:575
+#: includes/class-dashboard.php:275 includes/class-dashboard.php:431
+#: includes/class-dashboard.php:592
 msgid "You do not have permission to access this page."
 msgstr ""
 
-#: includes/class-dashboard.php:309 includes/class-settings-display.php:104
+#: includes/class-dashboard.php:326 includes/class-settings-display.php:104
 #: includes/class-widgets.php:85 includes/functions.php:707
-#: post-views-counter.php:418
+#: post-views-counter.php:509
 msgid "Total Views"
 msgstr ""
 
-#: includes/class-dashboard.php:479
+#: includes/class-dashboard.php:496
 msgid "Post"
 msgstr ""
 
-#: includes/class-dashboard.php:480
+#: includes/class-dashboard.php:497
 msgid "Views"
 msgstr ""
 
-#: includes/class-dashboard.php:525 includes/functions.php:698
+#: includes/class-dashboard.php:542 includes/functions.php:698
 msgid "No most viewed posts found."
+msgstr ""
+
+#: includes/class-emails-mailer.php:166
+msgid "WordPress could not send the content views summary email."
+msgstr ""
+
+#: includes/class-emails-mailer.php:226
+msgid "The content views summary recipient is invalid."
+msgstr ""
+
+#: includes/class-emails-mailer.php:884
+#, php-format
+msgid "Post Views Counter on %s"
+msgstr ""
+
+#: includes/class-emails-scheduler.php:46
+msgid "Post Views Counter weekly email summary interval"
+msgstr ""
+
+#: includes/class-emails-template.php:506
+#: includes/class-emails-template.php:880 includes/class-settings.php:273
+#: includes/class-settings.php:632 includes/class-settings.php:633
+msgid "Post Views Counter"
+msgstr ""
+
+#: includes/class-emails-template.php:1146
+#: includes/class-emails-template.php:1188
+msgid "Content views"
+msgstr ""
+
+#: includes/class-emails-template.php:1148
+#: includes/class-emails-template.php:1175
+#, php-format
+msgid "%s total views"
+msgstr ""
+
+#: includes/class-emails-template.php:1158
+#: includes/class-emails-template.php:1185
+#, php-format
+msgid "%s content items received views"
+msgstr ""
+
+#: includes/class-emails-template.php:1205
+#: includes/class-emails-template.php:1228
+msgid "No top content was available for this period."
+msgstr ""
+
+#: includes/class-emails-template.php:1207
+#: includes/class-emails-template.php:1242
+msgid "Top content"
+msgstr ""
+
+#: includes/class-emails-template.php:1210
+#: includes/class-emails-template.php:1233
+msgid "(Untitled)"
+msgstr ""
+
+#: includes/class-emails-template.php:1212
+#, php-format
+msgid "%1$s. %2$s - %3$s views"
+msgstr ""
+
+#: includes/class-emails-template.php:1238
+#, php-format
+msgid "%s views"
+msgstr ""
+
+#: includes/class-emails-template.php:1268
+#: includes/class-emails-template.php:1301
+#: includes/class-emails-template.php:1306
+msgid "Traffic signals"
+msgstr ""
+
+#: includes/class-emails-template.php:1297
+#: includes/class-emails-template.php:1375
+#, php-format
+msgid "Unusual traffic activity was detected for %s."
+msgstr ""
+
+#: includes/class-emails-template.php:1318
+#, php-format
+msgid "Manage Emails in WordPress: %s"
+msgstr ""
+
+#: includes/class-emails-template.php:1330
+msgid "Manage Emails in WordPress"
+msgstr ""
+
+#: includes/class-emails-template.php:1340
+#, php-format
+msgid "Visit your site: %s"
+msgstr ""
+
+#: includes/class-emails-template.php:1351
+msgid "your site"
+msgstr ""
+
+#: includes/class-emails-template.php:1353
+#, php-format
+msgid "Visit %s"
+msgstr ""
+
+#: includes/class-emails-template.php:1377
+msgid "Unusual traffic activity was detected during this report period."
+msgstr ""
+
+#: includes/class-emails-template.php:1380
+msgid "No unusual traffic activity was detected during this report period."
+msgstr ""
+
+#: includes/class-emails-template.php:1418
+msgid "day"
+msgstr ""
+
+#: includes/class-emails-template.php:1421
+msgid "month"
+msgstr ""
+
+#: includes/class-emails-template.php:1424
+msgid "week"
+msgstr ""
+
+#: includes/class-emails-template.php:1469 includes/class-import.php:332
+msgid "weekly"
+msgstr ""
+
+#: includes/class-emails-template.php:1484
+msgid "Weekly Content Views Summary"
+msgstr ""
+
+#: includes/class-emails-template.php:1643
+#, php-format
+msgid "No previous %s comparison is available yet"
+msgstr ""
+
+#: includes/class-emails-template.php:1649
+#, php-format
+msgid "No change from the previous %s"
+msgstr ""
+
+#: includes/class-emails-template.php:1654
+#, php-format
+msgid "Up %1$s views from the previous %2$s"
+msgstr ""
+
+#: includes/class-emails-template.php:1656
+#, php-format
+msgid "Down %1$s views from the previous %2$s"
 msgstr ""
 
 #: includes/class-import.php:62
@@ -351,10 +515,6 @@ msgstr ""
 
 #: includes/class-import.php:329
 msgid "monthly"
-msgstr ""
-
-#: includes/class-import.php:332
-msgid "weekly"
 msgstr ""
 
 #: includes/class-import.php:335
@@ -475,241 +635,241 @@ msgstr ""
 msgid "Skipped %1$s total views for %2$s posts."
 msgstr ""
 
-#: includes/class-integrations.php:101
+#: includes/class-integrations.php:110
 msgid ""
 "Integrate with WordPress block editor to order posts by views in Query Loop "
 "and Latest Posts blocks."
 msgstr ""
 
-#: includes/class-integrations.php:108
+#: includes/class-integrations.php:117
 msgid "Query Loop Block"
 msgstr ""
 
-#: includes/class-integrations.php:109
+#: includes/class-integrations.php:118
 msgid "Enables ordering posts by view count in the core Query Loop block."
 msgstr ""
 
-#: includes/class-integrations.php:113
+#: includes/class-integrations.php:122
 msgid "Latest Posts Block"
 msgstr ""
 
-#: includes/class-integrations.php:114
+#: includes/class-integrations.php:123
 msgid "Enables ordering posts by view count in the core Latest Posts block."
 msgstr ""
 
-#: includes/class-integrations.php:121
+#: includes/class-integrations.php:130
 msgid "Integrate with AMP plugin to handle post views on AMP pages."
 msgstr ""
 
-#: includes/class-integrations.php:128
+#: includes/class-integrations.php:137
 msgid "AMP Support"
 msgstr ""
 
-#: includes/class-integrations.php:129
+#: includes/class-integrations.php:138
 msgid "Tracks and displays views on AMP-enabled pages."
 msgstr ""
 
-#: includes/class-integrations.php:136
+#: includes/class-integrations.php:145
 msgid "Integrate with Beaver Builder to order module posts by views."
 msgstr ""
 
-#: includes/class-integrations.php:143
+#: includes/class-integrations.php:152
 msgid "Post Grid Module"
 msgstr ""
 
-#: includes/class-integrations.php:144
+#: includes/class-integrations.php:153
 msgid "Orders posts by views in the Beaver Builder Post Grid module."
 msgstr ""
 
-#: includes/class-integrations.php:148
+#: includes/class-integrations.php:157
 msgid "Post Carousel Module"
 msgstr ""
 
-#: includes/class-integrations.php:149
+#: includes/class-integrations.php:158
 msgid "Orders posts by views in the Beaver Builder Post Carousel module."
 msgstr ""
 
-#: includes/class-integrations.php:153 includes/class-integrations.php:193
+#: includes/class-integrations.php:162 includes/class-integrations.php:202
 msgid "Post Slider Module"
 msgstr ""
 
-#: includes/class-integrations.php:154
+#: includes/class-integrations.php:163
 msgid "Orders posts by views in the Beaver Builder Post Slider module."
 msgstr ""
 
-#: includes/class-integrations.php:161
+#: includes/class-integrations.php:170
 msgid "Integrate with CoBlocks to order post feed results by views."
 msgstr ""
 
-#: includes/class-integrations.php:168 includes/class-integrations.php:273
+#: includes/class-integrations.php:177 includes/class-integrations.php:282
 msgid "Posts Block"
 msgstr ""
 
-#: includes/class-integrations.php:169
+#: includes/class-integrations.php:178
 msgid "Adds post views ordering to the CoBlocks Posts block."
 msgstr ""
 
-#: includes/class-integrations.php:173
+#: includes/class-integrations.php:182
 msgid "Post Carousel Block"
 msgstr ""
 
-#: includes/class-integrations.php:174
+#: includes/class-integrations.php:183
 msgid "Adds post views ordering to the CoBlocks Post Carousel block."
 msgstr ""
 
-#: includes/class-integrations.php:181
+#: includes/class-integrations.php:190
 msgid ""
 "Integrate with Divi Theme to order module posts by views when the module "
 "uses the \"orderby-post-views\" CSS class."
 msgstr ""
 
-#: includes/class-integrations.php:188
+#: includes/class-integrations.php:197
 msgid "Blog Module"
 msgstr ""
 
-#: includes/class-integrations.php:189
+#: includes/class-integrations.php:198
 msgid "Orders posts by views in the Divi Blog module."
 msgstr ""
 
-#: includes/class-integrations.php:194
+#: includes/class-integrations.php:203
 msgid "Orders posts by views in the Divi Post Slider module."
 msgstr ""
 
-#: includes/class-integrations.php:198
+#: includes/class-integrations.php:207
 msgid "Portfolio Module"
 msgstr ""
 
-#: includes/class-integrations.php:199
+#: includes/class-integrations.php:208
 msgid "Orders posts by views in the Divi Portfolio module."
 msgstr ""
 
-#: includes/class-integrations.php:206
+#: includes/class-integrations.php:215
 msgid ""
 "Integrate with Elementor Pro to order posts by views when a widget query "
 "uses the \"post_views\" Query ID."
 msgstr ""
 
-#: includes/class-integrations.php:213
+#: includes/class-integrations.php:222
 msgid "Posts Widget"
 msgstr ""
 
-#: includes/class-integrations.php:214
+#: includes/class-integrations.php:223
 msgid ""
 "Orders posts by views in the Elementor Pro Posts widget when its Query ID is "
 "set to \"post_views\"."
 msgstr ""
 
-#: includes/class-integrations.php:218
+#: includes/class-integrations.php:227
 msgid "Portfolio Widget"
 msgstr ""
 
-#: includes/class-integrations.php:219
+#: includes/class-integrations.php:228
 msgid ""
 "Orders items by views in the Elementor Pro Portfolio widget when its Query "
 "ID is set to \"post_views\"."
 msgstr ""
 
-#: includes/class-integrations.php:223
+#: includes/class-integrations.php:232
 msgid "Loop Grid / Loop Carousel"
 msgstr ""
 
-#: includes/class-integrations.php:224
+#: includes/class-integrations.php:233
 msgid ""
 "Orders items by views in the Elementor Pro Loop Grid and Loop Carousel "
 "widgets when the Query ID is set to \"post_views\"."
 msgstr ""
 
-#: includes/class-integrations.php:231
+#: includes/class-integrations.php:240
 msgid "Integrate with GenerateBlocks to order Query block results by views."
 msgstr ""
 
-#: includes/class-integrations.php:238
+#: includes/class-integrations.php:247
 msgid "Dynamic Content"
 msgstr ""
 
-#: includes/class-integrations.php:239
+#: includes/class-integrations.php:248
 msgid "Adds post_views ordering to the GenerateBlocks Query block."
 msgstr ""
 
-#: includes/class-integrations.php:246
+#: includes/class-integrations.php:255
 msgid ""
 "Integrate with JetEngine plugin to display post views in custom listings and "
 "queries."
 msgstr ""
 
-#: includes/class-integrations.php:253
+#: includes/class-integrations.php:262
 msgid "Query Builder"
 msgstr ""
 
-#: includes/class-integrations.php:254
+#: includes/class-integrations.php:263
 msgid "Enables ordering posts by view count in Query Builder posts queries."
 msgstr ""
 
-#: includes/class-integrations.php:258
+#: includes/class-integrations.php:267
 msgid "Listing Grid"
 msgstr ""
 
-#: includes/class-integrations.php:259
+#: includes/class-integrations.php:268
 msgid ""
 "Enables ordering posts by view count in Listing Grid, Maps Listing and "
 "Calendar widgets."
 msgstr ""
 
-#: includes/class-integrations.php:266
+#: includes/class-integrations.php:275
 msgid ""
 "Integrate with Kadence Blocks to order post results by views in the Posts "
 "block."
 msgstr ""
 
-#: includes/class-integrations.php:274
+#: includes/class-integrations.php:283
 msgid "Adds post views ordering to the Posts block."
 msgstr ""
 
-#: includes/class-integrations.php:281
+#: includes/class-integrations.php:290
 msgid ""
 "Integrate with Polylang to filter reports, exports, and dashboard widgets by "
 "language."
 msgstr ""
 
-#: includes/class-integrations.php:288 includes/class-integrations.php:308
+#: includes/class-integrations.php:297 includes/class-integrations.php:317
 msgid "Reports Language Filters"
 msgstr ""
 
-#: includes/class-integrations.php:289 includes/class-integrations.php:309
+#: includes/class-integrations.php:298 includes/class-integrations.php:318
 msgid ""
 "Adds language filtering and a language column to Reports tables, charts, and "
 "exports."
 msgstr ""
 
-#: includes/class-integrations.php:293 includes/class-integrations.php:313
+#: includes/class-integrations.php:302 includes/class-integrations.php:322
 msgid "Dashboard Widgets"
 msgstr ""
 
-#: includes/class-integrations.php:294 includes/class-integrations.php:314
+#: includes/class-integrations.php:303 includes/class-integrations.php:323
 msgid ""
 "Filters dashboard widgets (site, post, and term views) by the selected "
 "language."
 msgstr ""
 
-#: includes/class-integrations.php:301
+#: includes/class-integrations.php:310
 msgid ""
 "Integrate with WPML to filter reports, exports, and dashboard widgets by "
 "language."
 msgstr ""
 
-#: includes/class-settings-api.php:368
+#: includes/class-settings-api.php:448
 msgid "Reset to defaults"
 msgstr ""
 
-#: includes/class-settings-api.php:789
+#: includes/class-settings-api.php:872
 msgid "Open color picker"
 msgstr ""
 
-#: includes/class-settings-api.php:988
+#: includes/class-settings-api.php:1118
 msgid "Settings saved."
 msgstr ""
 
-#: includes/class-settings-api.php:1014
+#: includes/class-settings-api.php:1144
 msgid "Settings restored to defaults."
 msgstr ""
 
@@ -965,6 +1125,316 @@ msgid ""
 "edit permissions, toolbar chart)."
 msgstr ""
 
+#: includes/class-settings-emails.php:37
+msgid "Email Summaries"
+msgstr ""
+
+#: includes/class-settings-emails.php:42
+msgid "Email Recipients"
+msgstr ""
+
+#: includes/class-settings-emails.php:47
+msgid "Email Template"
+msgstr ""
+
+#: includes/class-settings-emails.php:52
+msgid "Test Email"
+msgstr ""
+
+#: includes/class-settings-emails.php:57
+msgid "Delivery & Status"
+msgstr ""
+
+#: includes/class-settings-emails.php:73
+msgid "Email Summary"
+msgstr ""
+
+#: includes/class-settings-emails.php:76
+msgid "Send a summary of tracked content views to the selected recipient."
+msgstr ""
+
+#: includes/class-settings-emails.php:80
+msgid "Summary Frequency"
+msgstr ""
+
+#: includes/class-settings-emails.php:89
+msgid "Daily"
+msgstr ""
+
+#: includes/class-settings-emails.php:90
+msgid "Weekly"
+msgstr ""
+
+#: includes/class-settings-emails.php:91
+msgid "Monthly"
+msgstr ""
+
+#: includes/class-settings-emails.php:93
+msgid "Choose how often views tracking summaries are sent."
+msgstr ""
+
+#: includes/class-settings-emails.php:98
+msgid "Minimum Tracked Views"
+msgstr ""
+
+#: includes/class-settings-emails.php:103
+msgid ""
+"Do not send the summary if the report period has fewer than this many "
+"tracked views."
+msgstr ""
+
+#: includes/class-settings-emails.php:109
+msgid "Top Content Items"
+msgstr ""
+
+#: includes/class-settings-emails.php:114
+msgid "Choose how many top content items are included in each summary."
+msgstr ""
+
+#: includes/class-settings-emails.php:119
+msgid "Top Gainers and Decliners"
+msgstr ""
+
+#: includes/class-settings-emails.php:127
+msgid ""
+"Show which content is gaining or losing momentum compared with previous "
+"periods."
+msgstr ""
+
+#: includes/class-settings-emails.php:128
+#, php-format
+msgid ""
+"When matching data is available, this appears in the Traffic signals section "
+"if the email template includes %%traffic_signals%%."
+msgstr ""
+
+#: includes/class-settings-emails.php:132
+msgid "Author Summary"
+msgstr ""
+
+#: includes/class-settings-emails.php:140
+msgid ""
+"Include the authors whose content received the most tracked views during the "
+"report period."
+msgstr ""
+
+#: includes/class-settings-emails.php:141
+#, php-format
+msgid ""
+"When matching data is available, this appears in the Report summary section "
+"if the email template includes %%report_summary%%."
+msgstr ""
+
+#: includes/class-settings-emails.php:145
+msgid "Source Summary"
+msgstr ""
+
+#: includes/class-settings-emails.php:153
+msgid ""
+"Include top referrers or source dimensions when source tracking is available."
+msgstr ""
+
+#: includes/class-settings-emails.php:154
+#, php-format
+msgid ""
+"When source tracking data is available, this appears in the Report summary "
+"section if the email template includes %%report_summary%%."
+msgstr ""
+
+#: includes/class-settings-emails.php:159
+msgid "Recipient Email"
+msgstr ""
+
+#: includes/class-settings-emails.php:163
+msgid ""
+"The email address that receives summary emails. Defaults to the site "
+"administrator email."
+msgstr ""
+
+#: includes/class-settings-emails.php:168
+msgid "Additional Recipients"
+msgstr ""
+
+#: includes/class-settings-emails.php:176
+msgid "Send summaries to multiple people with CC and BCC recipients."
+msgstr ""
+
+#: includes/class-settings-emails.php:180
+msgid "CC Recipients"
+msgstr ""
+
+#: includes/class-settings-emails.php:195
+msgid "Send visible copies to additional recipients."
+msgstr ""
+
+#: includes/class-settings-emails.php:199
+msgid "BCC Recipients"
+msgstr ""
+
+#: includes/class-settings-emails.php:214
+msgid "Send private copies to additional recipients."
+msgstr ""
+
+#: includes/class-settings-emails.php:219
+msgid "Email Subject"
+msgstr ""
+
+#: includes/class-settings-emails.php:229
+msgid "Email Content"
+msgstr ""
+
+#: includes/class-settings-emails.php:238
+msgid "Send Test To"
+msgstr ""
+
+#: includes/class-settings-emails.php:246
+msgid "Schedule Status"
+msgstr ""
+
+#: includes/class-settings-emails.php:249
+msgid ""
+"Weekly summaries are scheduled for Monday after the previous full week has "
+"ended."
+msgstr ""
+
+#: includes/class-settings-emails.php:250
+msgid ""
+"Summary emails are scheduled with WordPress cron. Delivery time may vary "
+"depending on site traffic and hosting configuration."
+msgstr ""
+
+#: includes/class-settings-emails.php:255
+msgid "Next Scheduled Email"
+msgstr ""
+
+#: includes/class-settings-emails.php:263
+msgid "Last Sent"
+msgstr ""
+
+#: includes/class-settings-emails.php:271
+msgid "Last Error"
+msgstr ""
+
+#: includes/class-settings-emails.php:286
+msgid "Send email summaries with your most viewed content and view totals."
+msgstr ""
+
+#: includes/class-settings-emails.php:295
+msgid "Choose who should receive your email summaries."
+msgstr ""
+
+#: includes/class-settings-emails.php:304
+msgid "Review scheduling, delivery, and recent email status information."
+msgstr ""
+
+#: includes/class-settings-emails.php:313
+msgid "Customize the subject and message used for content views summaries."
+msgstr ""
+
+#: includes/class-settings-emails.php:323
+msgid ""
+"Send a test using the latest available summary. This does not change the "
+"saved recipient or scheduled delivery."
+msgstr ""
+
+#: includes/class-settings-emails.php:335
+msgid "email@example.com"
+msgstr ""
+
+#: includes/class-settings-emails.php:335
+msgid "Test email recipient"
+msgstr ""
+
+#: includes/class-settings-emails.php:336
+msgid "Send Test Email"
+msgstr ""
+
+#: includes/class-settings-emails.php:336
+msgid "Sending..."
+msgstr ""
+
+#: includes/class-settings-emails.php:337
+msgid "Enter an email address for this test only."
+msgstr ""
+
+#: includes/class-settings-emails.php:355
+msgid "Sorry, you are not allowed to do that."
+msgstr ""
+
+#: includes/class-settings-emails.php:394
+msgid "Enter a valid test recipient email address."
+msgstr ""
+
+#: includes/class-settings-emails.php:416
+msgid ""
+"There is not enough tracked data from the latest complete week to send a "
+"real test summary yet."
+msgstr ""
+
+#: includes/class-settings-emails.php:436
+msgid "The summary test email was sent successfully."
+msgstr ""
+
+#: includes/class-settings-emails.php:444
+#, php-format
+msgid "The test email could not be sent. %s"
+msgstr ""
+
+#: includes/class-settings-emails.php:445
+msgid ""
+"The test email could not be sent. Check your WordPress mail configuration "
+"and try again."
+msgstr ""
+
+#: includes/class-settings-emails.php:462
+msgid "Recipient email is required while the views summary email is enabled."
+msgstr ""
+
+#: includes/class-settings-emails.php:468
+msgid "Enter a valid recipient email address for the views summary email."
+msgstr ""
+
+#: includes/class-settings-emails.php:487
+msgid "Minimum tracked views cannot be lower than 0."
+msgstr ""
+
+#: includes/class-settings-emails.php:516
+#, php-format
+msgid ""
+"%1$s contained tags that are not available in this field. Removed tags: "
+"%2$s. Supported tags here: %3$s"
+msgstr ""
+
+#: includes/class-settings-emails.php:639
+msgid "Customize the subject line for summary emails."
+msgstr ""
+
+#: includes/class-settings-emails.php:641
+#, php-format
+msgid "Use supported subject tags such as %1$s and %2$s."
+msgstr ""
+
+#: includes/class-settings-emails.php:655
+msgid "Customize the main message sent with each email summary."
+msgstr ""
+
+#: includes/class-settings-emails.php:657
+#, php-format
+msgid "Use supported content tags such as %s."
+msgstr ""
+
+#: includes/class-settings-emails.php:742
+msgid "Not sent yet."
+msgstr ""
+
+#: includes/class-settings-emails.php:759
+msgid "Not scheduled."
+msgstr ""
+
+#: includes/class-settings-emails.php:772
+msgid "No email errors recorded yet."
+msgstr ""
+
 #: includes/class-settings-general.php:54
 msgid "PHP"
 msgstr ""
@@ -998,11 +1468,12 @@ msgid "Performance & Caching"
 msgstr ""
 
 #: includes/class-settings-general.php:101
-#: includes/class-settings-general.php:460
+#: includes/class-settings-general.php:452
 msgid "minutes"
 msgstr ""
 
 #: includes/class-settings-general.php:102
+#: includes/class-settings-general.php:217
 msgid "hours"
 msgstr ""
 
@@ -1094,92 +1565,92 @@ msgstr ""
 msgid "Count Interval"
 msgstr ""
 
-#: includes/class-settings-general.php:222
+#: includes/class-settings-general.php:223
 msgid "Count Time"
 msgstr ""
 
-#: includes/class-settings-general.php:228
+#: includes/class-settings-general.php:229
 msgid ""
 "Whether to store the views using GMT timezone or adjust it to the GMT offset "
 "of the site."
 msgstr ""
 
-#: includes/class-settings-general.php:230
+#: includes/class-settings-general.php:231
 msgid "GMT Time"
 msgstr ""
 
-#: includes/class-settings-general.php:231
+#: includes/class-settings-general.php:232
 msgid "Local Time"
 msgstr ""
 
-#: includes/class-settings-general.php:237
+#: includes/class-settings-general.php:238
 msgid "Strict Counts"
 msgstr ""
 
-#: includes/class-settings-general.php:245
+#: includes/class-settings-general.php:246
 msgid ""
 "Prevent bypassing the count interval (for example by using incognito mode or "
 "clearing cookies)."
 msgstr ""
 
-#: includes/class-settings-general.php:250
+#: includes/class-settings-general.php:251
 msgid "Cleanup Interval"
 msgstr ""
 
-#: includes/class-settings-general.php:253
+#: includes/class-settings-general.php:254
 #, php-format
 msgid ""
 "Delete daily content view data older than the period specified above. Enter "
 "%s to keep data regardless of age. Cleanup runs once per day."
 msgstr ""
 
-#: includes/class-settings-general.php:262
+#: includes/class-settings-general.php:263
 msgid "Caching Compatibility"
 msgstr ""
 
-#: includes/class-settings-general.php:277
+#: includes/class-settings-general.php:278
 msgid "Object Cache Support"
 msgstr ""
 
-#: includes/class-settings-general.php:292
+#: includes/class-settings-general.php:293
 msgid "Exclude Visitors"
 msgstr ""
 
-#: includes/class-settings-general.php:295
+#: includes/class-settings-general.php:296
 msgid "Use this to exclude specific visitor groups from counting views."
 msgstr ""
 
-#: includes/class-settings-general.php:306
+#: includes/class-settings-general.php:307
 msgid "Exclude User Roles"
 msgstr ""
 
-#: includes/class-settings-general.php:309
+#: includes/class-settings-general.php:310
 msgid "Use this to exclude specific user roles from counting views."
 msgstr ""
 
-#: includes/class-settings-general.php:325
+#: includes/class-settings-general.php:326
 msgid "Exclude IPs"
 msgstr ""
 
-#: includes/class-settings-general.php:379
+#: includes/class-settings-general.php:375
 msgid ""
-"Minimum time between counting new views from the same visitor. Enter "
-"<code>0</code> to count every page view."
+"Minimum time between counting new views from the same visitor, in hours. "
+"Enter <code>0</code> to count every page view."
 msgstr ""
 
-#: includes/class-settings-general.php:461
+#: includes/class-settings-general.php:453
 msgid "Persistent Object Cache"
 msgstr ""
 
-#: includes/class-settings-general.php:461
+#: includes/class-settings-general.php:453
 msgid "available"
 msgstr ""
 
-#: includes/class-settings-general.php:461
+#: includes/class-settings-general.php:453
 msgid "unavailable"
 msgstr ""
 
-#: includes/class-settings-general.php:462
+#: includes/class-settings-general.php:454
 #, php-format
 msgid ""
 "How often to flush cached view counts from the object cache into the "
@@ -1192,82 +1663,82 @@ msgid ""
 "the duration of the interval."
 msgstr ""
 
-#: includes/class-settings-general.php:541
-#: includes/class-settings-general.php:547
+#: includes/class-settings-general.php:533
+#: includes/class-settings-general.php:539
 msgid "Remove"
 msgstr ""
 
-#: includes/class-settings-general.php:555
+#: includes/class-settings-general.php:547
 msgid "Add new"
 msgstr ""
 
-#: includes/class-settings-general.php:555
+#: includes/class-settings-general.php:547
 msgid "Add my current IP"
 msgstr ""
 
-#: includes/class-settings-general.php:558
+#: includes/class-settings-general.php:550
 msgid ""
 "Add IPv4 or IPv6 addresses to exclude them from counting views. Wildcards "
 "are supported for IPv4 only (e.g. 192.168.0.*)."
 msgstr ""
 
-#: includes/class-settings-general.php:597
+#: includes/class-settings-general.php:589
 msgid ""
 "Control which post types, archives and other content types are included in "
 "view counting."
 msgstr ""
 
-#: includes/class-settings-general.php:606
+#: includes/class-settings-general.php:598
 msgid ""
 "Control how views are recorded — counting mode, intervals, time zone, and "
 "cleanup."
 msgstr ""
 
-#: includes/class-settings-general.php:615
+#: includes/class-settings-general.php:607
 msgid ""
 "Exclude specific visitor groups or IP addresses from incrementing view "
 "counts."
 msgstr ""
 
-#: includes/class-settings-general.php:624
+#: includes/class-settings-general.php:616
 msgid "Configure caching compatibility and object-cache handling for counting."
 msgstr ""
 
-#: includes/class-settings-general.php:639
+#: includes/class-settings-general.php:631
 msgid "Currently detected active caching plugins"
 msgstr ""
 
-#: includes/class-settings-general.php:647
+#: includes/class-settings-general.php:639
 msgid "No compatible caching plugins found."
 msgstr ""
 
-#: includes/class-settings-general.php:659
+#: includes/class-settings-general.php:651
 msgid "Enable compatibility tweaks for supported caching plugins."
 msgstr ""
 
-#: includes/class-settings-general.php:663
-#: includes/class-settings-general.php:679
+#: includes/class-settings-general.php:655
+#: includes/class-settings-general.php:671
 #: includes/class-settings-integrations.php:97
 msgid "(available)"
 msgstr ""
 
-#: includes/class-settings-general.php:675
+#: includes/class-settings-general.php:667
 msgid "Enable Redis or Memcached object cache optimization."
 msgstr ""
 
-#: includes/class-settings-general.php:712
+#: includes/class-settings-general.php:704
 msgid "Persistent object cache has been detected."
 msgstr ""
 
-#: includes/class-settings-general.php:715
+#: includes/class-settings-general.php:707
 #, php-format
 msgid ""
 "This feature requires a persistent object cache like %s or %s to be "
 "installed and activated."
 msgstr ""
 
-#: includes/class-settings-integrations.php:22 includes/class-settings.php:617
-#: includes/class-settings.php:680 includes/class-settings.php:681
+#: includes/class-settings-integrations.php:22 includes/class-settings.php:653
+#: includes/class-settings.php:721 includes/class-settings.php:722
 msgid "Integrations"
 msgstr ""
 
@@ -1417,150 +1888,176 @@ msgstr ""
 msgid "Export, download and share your website views data."
 msgstr ""
 
-#: includes/class-settings-reports.php:61 includes/class-settings.php:181
+#: includes/class-settings-reports.php:61 includes/class-settings.php:192
 msgid "Upgrade to Pro"
 msgstr ""
 
-#: includes/class-settings.php:182
+#: includes/class-settings.php:193
 msgid "Starting from $29 per year"
 msgstr ""
 
-#: includes/class-settings.php:182
+#: includes/class-settings.php:193
 msgid "14-day money back guarantee."
 msgstr ""
 
-#: includes/class-settings.php:199
+#: includes/class-settings.php:210
 msgid "Reliable view counting"
 msgstr ""
 
-#: includes/class-settings.php:201
+#: includes/class-settings.php:212
 msgid "Accurate counts with caching enabled"
 msgstr ""
 
-#: includes/class-settings.php:202
+#: includes/class-settings.php:213
 msgid "Better performance under high traffic"
 msgstr ""
 
-#: includes/class-settings.php:203
+#: includes/class-settings.php:214
 msgid "Protection against fake and repeated views"
 msgstr ""
 
-#: includes/class-settings.php:205
+#: includes/class-settings.php:216
 msgid ""
 "Upgrade to Pro to make your view counts reliable on real-world, cached "
 "WordPress sites."
 msgstr ""
 
-#: includes/class-settings.php:208
+#: includes/class-settings.php:219
 msgid "Accurate & meaningful view display"
 msgstr ""
 
-#: includes/class-settings.php:210
+#: includes/class-settings.php:221
 msgid "Choose which time period is displayed"
 msgstr ""
 
-#: includes/class-settings.php:211
+#: includes/class-settings.php:222
 msgid "Always show up-to-date view counts"
 msgstr ""
 
-#: includes/class-settings.php:212
+#: includes/class-settings.php:223
 msgid "Control where the counter appears"
 msgstr ""
 
-#: includes/class-settings.php:214
+#: includes/class-settings.php:225
 msgid ""
 "Upgrade to Pro to control what view data visitors actually see - not just "
 "total counts."
 msgstr ""
 
-#: includes/class-settings.php:217
+#: includes/class-settings.php:228
 msgid "Advanced view reports"
 msgstr ""
 
-#: includes/class-settings.php:219
+#: includes/class-settings.php:230
 msgid ""
 "Upgrade to Pro to access detailed reports and visual insights for your "
 "content."
 msgstr ""
 
-#: includes/class-settings.php:222
+#: includes/class-settings.php:233
 msgid "Use view counts where they actually matter"
 msgstr ""
 
-#: includes/class-settings.php:224
+#: includes/class-settings.php:235
 msgid "Display and sort content by popularity"
 msgstr ""
 
-#: includes/class-settings.php:225
+#: includes/class-settings.php:236
 msgid "Works with the tools you already use"
 msgstr ""
 
-#: includes/class-settings.php:226
+#: includes/class-settings.php:237
 msgid "No custom queries or advanced setup"
 msgstr ""
 
-#: includes/class-settings.php:228
+#: includes/class-settings.php:239
 msgid ""
 "Upgrade to Pro to use view data across layouts and blocks - not just store "
 "it."
 msgstr ""
 
-#: includes/class-settings.php:231
+#: includes/class-settings.php:242
+msgid "Deeper email summaries"
+msgstr ""
+
+#: includes/class-settings.php:244
+msgid "Spot content gaining or losing momentum"
+msgstr ""
+
+#: includes/class-settings.php:245
+msgid "Include author and source summaries"
+msgstr ""
+
+#: includes/class-settings.php:246
+msgid "Send daily or monthly summaries"
+msgstr ""
+
+#: includes/class-settings.php:247
+msgid "Add CC/BCC recipients for your team"
+msgstr ""
+
+#: includes/class-settings.php:249
+msgid ""
+"Go beyond a weekly top-content list. Pro adds richer summaries with trends, "
+"authors, sources, and flexible delivery options."
+msgstr ""
+
+#: includes/class-settings.php:252
 msgid "Migrate your view data safely"
 msgstr ""
 
-#: includes/class-settings.php:233
+#: includes/class-settings.php:254
 msgid "Import view data from other WordPress plugins"
 msgstr ""
 
-#: includes/class-settings.php:234
+#: includes/class-settings.php:255
 msgid "Choose how existing data is handled"
 msgstr ""
 
-#: includes/class-settings.php:235
+#: includes/class-settings.php:256
 msgid "Support for posts and other content types"
 msgstr ""
 
-#: includes/class-settings.php:237
+#: includes/class-settings.php:258
 msgid ""
 "Upgrade to Pro to migrate historical view data without losing control over "
 "existing counts."
 msgstr ""
 
-#: includes/class-settings.php:252 includes/class-settings.php:596
-#: includes/class-settings.php:597
-msgid "Post Views Counter"
-msgstr ""
-
-#: includes/class-settings.php:602 includes/class-settings.php:650
-#: includes/class-settings.php:651
+#: includes/class-settings.php:638 includes/class-settings.php:691
+#: includes/class-settings.php:692
 msgid "Counting"
 msgstr ""
 
-#: includes/class-settings.php:607 includes/class-settings.php:660
-#: includes/class-settings.php:661
+#: includes/class-settings.php:643 includes/class-settings.php:701
+#: includes/class-settings.php:702
 msgid "Display"
 msgstr ""
 
-#: includes/class-settings.php:612 includes/class-settings.php:670
-#: includes/class-settings.php:671 includes/class-settings.php:703
+#: includes/class-settings.php:648 includes/class-settings.php:711
+#: includes/class-settings.php:712 includes/class-settings.php:754
 msgid "Reports"
 msgstr ""
 
-#: includes/class-settings.php:622 includes/class-settings.php:690
-#: includes/class-settings.php:691
+#: includes/class-settings.php:658 includes/class-settings.php:731
+#: includes/class-settings.php:732
+msgid "Emails"
+msgstr ""
+
+#: includes/class-settings.php:663 includes/class-settings.php:741
+#: includes/class-settings.php:742
 msgid "Other"
 msgstr ""
 
-#: includes/class-settings.php:884
+#: includes/class-settings.php:942
 msgid "All existing data deleted successfully."
 msgstr ""
 
-#: includes/class-settings.php:886
+#: includes/class-settings.php:944
 msgid "Error occurred. All existing data were not deleted."
 msgstr ""
 
-#: includes/class-settings.php:1001
+#: includes/class-settings.php:1088
 msgid "NEW!"
 msgstr ""
 
@@ -1569,31 +2066,31 @@ msgstr ""
 msgid "%s post view"
 msgstr ""
 
-#: includes/class-traffic-signals.php:96
+#: includes/class-traffic-signals.php:95
 msgid "Traffic Signals"
 msgstr ""
 
-#: includes/class-traffic-signals.php:134
+#: includes/class-traffic-signals.php:133
 msgid "No unusual activity detected."
 msgstr ""
 
-#: includes/class-traffic-signals.php:140
+#: includes/class-traffic-signals.php:139
 msgid ""
 "Unusual traffic pattern detected. More insights available in Post Views "
 "Counter Pro."
 msgstr ""
 
-#: includes/class-update.php:192
+#: includes/class-update.php:212
 msgid ""
 "<strong>Post Views Counter</strong> - this version requires a database "
 "update. Make sure to back up your database first."
 msgstr ""
 
-#: includes/class-update.php:193
+#: includes/class-update.php:213
 msgid "Run the Update"
 msgstr ""
 
-#: includes/class-update.php:236
+#: includes/class-update.php:307
 msgid "Thank you! Datebase was successfully updated."
 msgstr ""
 
@@ -1625,46 +2122,54 @@ msgstr ""
 msgid "Display post thumbnail?"
 msgstr ""
 
-#: post-views-counter.php:573
+#: post-views-counter.php:765
 #, php-format
 msgid ""
 "Hey, you've been using <strong>Post Views Counter</strong> for more than %s."
 msgstr ""
 
-#: post-views-counter.php:573
+#: post-views-counter.php:765
 msgid ""
 "Could you please do me a BIG favor and give it a 5-star rating on WordPress "
 "to help us spread the word and boost our motivation."
 msgstr ""
 
-#: post-views-counter.php:573
+#: post-views-counter.php:765
 msgid "Your help is much appreciated. Thank you very much"
 msgstr ""
 
-#: post-views-counter.php:573
+#: post-views-counter.php:765
 msgid "founder of"
 msgstr ""
 
-#: post-views-counter.php:573
+#: post-views-counter.php:765
 msgid "Ok, you deserve it"
 msgstr ""
 
-#: post-views-counter.php:573
+#: post-views-counter.php:765
 msgid "Nope, maybe later"
 msgstr ""
 
-#: post-views-counter.php:573
+#: post-views-counter.php:765
 msgid "I already did"
 msgstr ""
 
-#: post-views-counter.php:921
+#: post-views-counter.php:1139
 msgid "Are you sure you want to reset these settings to defaults?"
 msgstr ""
 
-#: post-views-counter.php:922
+#: post-views-counter.php:1140
 msgid "Are you sure you want to delete all existing data?"
 msgstr ""
 
-#: post-views-counter.php:923
+#: post-views-counter.php:1141
 msgid "Are you sure you want to import views now?"
+msgstr ""
+
+#: post-views-counter.php:1143
+msgid "The test email request did not return a valid response."
+msgstr ""
+
+#: post-views-counter.php:1144
+msgid "The test email request could not be completed. Please try again."
 msgstr ""

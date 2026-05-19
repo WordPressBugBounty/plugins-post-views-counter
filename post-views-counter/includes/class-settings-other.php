@@ -63,7 +63,7 @@ class Post_Views_Counter_Settings_Other {
 				'disabled'		=> true,
 				'value'			=> $this->pvc->options['other']['license'],
 				'type'			=> 'input',
-				'description'	=> sprintf( __( 'Enter your %s license key (requires Pro version to be installed and active).', 'post-views-counter' ), '<a href="https://postviewscounter.com/" target="_blank">Post Views Counter Pro</a>' ),
+				'description'	=> sprintf( __( 'Enter your %s license key (requires Pro version to be installed and active).', 'post-views-counter' ), '<a href="' . esc_url( $this->pvc->get_postviewscounter_url( '/upgrade/', 'link', 'license', 'license-field-pro-link', 'free' ) ) . '" target="_blank">Post Views Counter Pro</a>' ),
 				'subclass'		=> 'regular-text',
 				'validate'		=> [ $this, 'validate_license' ],
 				'append'		=> '<span class="pvc-status-icon"></span>'

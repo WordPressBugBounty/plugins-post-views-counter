@@ -36,6 +36,11 @@ class Post_Views_Counter_Settings {
 	public $integrations;
 
 	/**
+	 * @var Post_Views_Counter_Settings_Emails
+	 */
+	public $emails;
+
+	/**
 	 * Class constructor.
 	 *
 	 * @return void
@@ -59,6 +64,7 @@ class Post_Views_Counter_Settings {
 		$this->display = new Post_Views_Counter_Settings_Display();
 		$this->reports = new Post_Views_Counter_Settings_Reports();
 		$this->integrations = new Post_Views_Counter_Settings_Integrations();
+		$this->emails = new Post_Views_Counter_Settings_Emails();
 		$this->other = new Post_Views_Counter_Settings_Other( $this );
 	}
 
@@ -89,6 +95,11 @@ class Post_Views_Counter_Settings {
 		// Check if method exists in integrations page class
 		if ( method_exists( $this->integrations, $method ) ) {
 			return call_user_func_array( [ $this->integrations, $method ], $args );
+		}
+
+		// Check if method exists in emails page class
+		if ( method_exists( $this->emails, $method ) ) {
+			return call_user_func_array( [ $this->emails, $method ], $args );
 		}
 
 		// Check if method exists in other page class
@@ -178,7 +189,7 @@ class Post_Views_Counter_Settings {
 								' . $body_html . '
 							</div>
 							<div class="pvc-sidebar-footer">
-								<a href="https://postviewscounter.com/upgrade/?utm_source=post-views-counter-lite&utm_medium=button&utm_campaign=upgrade-to-pro" class="button button-secondary button-hero pvc-button" target="_blank">' . esc_html__( 'Upgrade to Pro', 'post-views-counter' ) . ' &rarr;</a>
+								<a href="' . esc_url( Post_Views_Counter()->get_postviewscounter_url( '/upgrade/', 'button', 'upgrade-to-pro', 'settings-sidebar-upgrade-button', 'free' ) ) . '" class="button button-secondary button-hero pvc-button" target="_blank">' . esc_html__( 'Upgrade to Pro', 'post-views-counter' ) . ' &rarr;</a>
 								<p>' . esc_html__( 'Starting from $29 per year', 'post-views-counter' ) . '<br />' . esc_html__( '14-day money back guarantee.', 'post-views-counter' ) . '</p>
 							</div>
 						</div>
@@ -227,6 +238,16 @@ class Post_Views_Counter_Settings {
 				],
 				'one_liner' => __( 'Upgrade to Pro to use view data across layouts and blocks - not just store it.', 'post-views-counter' )
 			],
+			'emails' => [
+				'subtitle'  => __( 'Deeper email summaries', 'post-views-counter' ),
+				'bullets'   => [
+					__( 'Spot content gaining or losing momentum', 'post-views-counter' ),
+					__( 'Include author and source summaries', 'post-views-counter' ),
+					__( 'Send daily or monthly summaries', 'post-views-counter' ),
+					__( 'Add CC/BCC recipients for your team', 'post-views-counter' )
+				],
+				'one_liner' => __( 'Go beyond a weekly top-content list. Pro adds richer summaries with trends, authors, sources, and flexible delivery options.', 'post-views-counter' )
+			],
 			'other' => [
 				'subtitle'  => __( 'Migrate your view data safely', 'post-views-counter' ),
 				'bullets'   => [
@@ -260,6 +281,7 @@ class Post_Views_Counter_Settings {
 				'display'	=> 'post_views_counter_settings_display',
 				'reports'	=> 'post_views_counter_settings_reports',
 				'integrations'	=> 'post_views_counter_settings_integrations',
+				'emails'	=> 'post_views_counter_settings_emails',
 				'other'		=> 'post_views_counter_settings_other'
 			],
 			'validate' => [ $this, 'validate_settings' ],
@@ -267,15 +289,17 @@ class Post_Views_Counter_Settings {
 				$this->general->get_sections(),
 				$this->display->get_sections(),
 				$this->reports->get_sections(),
-				$this->other->get_sections(),
-				$this->integrations->get_sections()
+				$this->integrations->get_sections(),
+				$this->emails->get_sections(),
+				$this->other->get_sections()
 			),
 			'fields' => array_merge(
 				$this->general->get_fields(),
 				$this->display->get_fields(),
 				$this->reports->get_fields(),
-				$this->other->get_fields(),
-				$this->integrations->get_fields()
+				$this->integrations->get_fields(),
+				$this->emails->get_fields(),
+				$this->other->get_fields()
 			)
 		];
 
@@ -436,6 +460,18 @@ class Post_Views_Counter_Settings {
 		foreach ( $fields as $field_key => &$field ) {
 			// Skip if field doesn't have pro_only flag
 			if ( empty( $field['pro_only'] ) ) {
+				continue;
+			}
+
+			// Keep email-tab controls disabled in this pass, but remove upgrade
+			// badge classes so the UI reflects their current inactive state.
+			if ( ! empty( $field['tab'] ) && $field['tab'] === 'emails' ) {
+				if ( isset( $field['class'] ) ) {
+					$classes = array_filter( array_map( 'trim', explode( ' ', $field['class'] ) ) );
+					$classes = array_diff( $classes, [ 'pvc-pro', 'pvc-pro-extended' ] );
+					$field['class'] = implode( ' ', $classes );
+				}
+
 				continue;
 			}
 
@@ -618,6 +654,11 @@ class Post_Views_Counter_Settings {
 					'option_name'	=> 'post_views_counter_settings_integrations',
 					'use_plugin_title' => true
 				],
+				'emails'	 => [
+					'label'			=> __( 'Emails', 'post-views-counter' ),
+					'option_name'	=> 'post_views_counter_settings_emails',
+					'use_plugin_title' => true
+				],
 				'other'		=> [
 					'label'			=> __( 'Other', 'post-views-counter' ),
 					'option_name'	=> 'post_views_counter_settings_other',
@@ -678,7 +719,17 @@ class Post_Views_Counter_Settings {
 				'parent_slug'	=> 'post-views-counter',
 				'type'			=> 'subpage',
 				'page_title'	=> __( 'Integrations', 'post-views-counter' ),
-				'menu_title'	=> self::mark_new( __( 'Integrations', 'post-views-counter' ) ),
+				'menu_title'	=> __( 'Integrations', 'post-views-counter' ),
+				'capability'	=> apply_filters( 'pvc_settings_capability', 'manage_options' ),
+				'callback'		=> null
+			];
+
+			$pages['post-views-counter-emails'] = [
+				'menu_slug'		=> 'post-views-counter&tab=emails',
+				'parent_slug'	=> 'post-views-counter',
+				'type'			=> 'subpage',
+				'page_title'	=> __( 'Emails', 'post-views-counter' ),
+				'menu_title'	=> self::mark_new( __( 'Emails', 'post-views-counter' ) ),
 				'capability'	=> apply_filters( 'pvc_settings_capability', 'manage_options' ),
 				'callback'		=> null
 			];
@@ -812,7 +863,9 @@ class Post_Views_Counter_Settings {
 	 */
 	public function validate_settings( $input ) {
 		// check capability
-		if ( ! current_user_can( 'manage_options' ) )
+		$capability = apply_filters( 'pvc_settings_capability', 'manage_options' );
+
+		if ( ! current_user_can( $capability ) )
 			return $input;
 
 		global $wpdb;
@@ -840,6 +893,11 @@ class Post_Views_Counter_Settings {
 
 		// use internal settings api to validate settings first
 		$input = $pvc->settings_api->validate_settings( $input );
+
+		$option_page = isset( $_POST['option_page'] ) ? sanitize_key( wp_unslash( $_POST['option_page'] ) ) : '';
+
+		if ( $option_page === 'post_views_counter_settings_emails' )
+			$input = $this->preserve_email_runtime_settings( $input, $pvc->options['emails'] );
 
 		// merge exclude fields for backward compatibility
 		if ( isset( $input['exclude_groups'] ) || isset( $input['exclude_roles'] ) ) {
@@ -926,6 +984,35 @@ class Post_Views_Counter_Settings {
 					$input['integrations'][$slug] = false;
 				}
 			}
+		}
+
+		return $input;
+	}
+
+	/**
+	 * Preserve non-field email settings and runtime status metadata on save.
+	 *
+	 * @param array $input
+	 * @param array $current_settings
+	 * @return array
+	 */
+	private function preserve_email_runtime_settings( $input, $current_settings ) {
+		if ( ! is_array( $input ) )
+			$input = [];
+
+		if ( ! is_array( $current_settings ) )
+			return $input;
+
+		$email_fields = $this->emails->get_fields();
+
+		if ( ! is_array( $email_fields ) )
+			return $input;
+
+		foreach ( $current_settings as $key => $value ) {
+			if ( array_key_exists( $key, $email_fields ) )
+				continue;
+
+			$input[$key] = $value;
 		}
 
 		return $input;

@@ -198,13 +198,13 @@ class Post_Views_Counter_Dashboard {
 						<li>' . esc_html__( 'Go beyond basic post views.', 'post-views-counter' ) . '</li>
 						<li>' . esc_html__( 'See site views, referrers, popular searches, top users, and more.', 'post-views-counter' ) . '</li>
 					</ul>
-					<a href="https://postviewscounter.com/upgrade/?utm_source=post-views-counter-lite&utm_medium=link&utm_campaign=dashboard-unlock" class="button button-secondary" target="_blank">' . esc_html__( 'Unlock more insights', 'post-views-counter' ) . ' &rarr;</a>
+					<a href="' . esc_url( Post_Views_Counter()->get_postviewscounter_url( '/upgrade/', 'button', 'upgrade-to-pro', 'dashboard-unlock-button', 'free' ) ) . '" class="button button-secondary" target="_blank">' . esc_html__( 'Unlock more insights', 'post-views-counter' ) . ' &rarr;</a>
 				</div>
 			</div>';
 		}
 
 		$html .= '
-		<div class="pvc-dashboard-block"><span>' . esc_html__( 'Powered by', 'post-views-counter' ) . ' <a href="https://postviewscounter.com/?utm_source=post-views-counter-lite&utm_medium=link&utm_campaign=powered-by" target="_blank">Post Views Counter</a></span></div>
+		<div class="pvc-dashboard-block"><span>' . esc_html__( 'Powered by', 'post-views-counter' ) . ' <a href="' . esc_url( Post_Views_Counter()->get_postviewscounter_url( '/', 'link', 'powered-by', 'dashboard-powered-by-link', 'free' ) ) . '" target="_blank">Post Views Counter</a></span></div>
 		</div>';
 
 		// Output is admin-only, content is already escaped, and contains dynamic elements like canvas
