@@ -95,6 +95,34 @@ if ( ! function_exists( 'pvc_get_post_views' ) ) {
 			}
 		}
 
+		$is_total_period_query = false;
+
+		if (
+			$period === 'total'
+			&& ( ! isset( $args['type'] ) || (int) $args['type'] === 4 )
+			&& ( ! isset( $args['period_type'] ) || sanitize_key( $args['period_type'] ) === 'total' )
+		) {
+			$is_total_period_query = true;
+		} elseif (
+			isset( $args['period_type'] )
+			&& sanitize_key( $args['period_type'] ) === 'total'
+			&& ( ! isset( $args['type'] ) || (int) $args['type'] === 4 )
+		) {
+			$is_total_period_query = true;
+		} elseif (
+			isset( $args['type'] )
+			&& (int) $args['type'] === 4
+			&& ! isset( $args['period_type'] )
+			&& in_array( $period, [ '', 'total' ], true )
+		) {
+			$is_total_period_query = true;
+		}
+
+		// total views are stored as a dedicated period; constrain the query so existing indexes can be used.
+		if ( $is_total_period_query && ! $range_from && ! $range_to ) {
+			$where['period'] = "period = 'total'";
+		}
+
 		// handle explicit content parameter for custom implementations
 		if ( isset( $args['content'] ) ) {
 			$where['content'] = 'content = ' . (int) $args['content'];
@@ -111,6 +139,11 @@ if ( ! function_exists( 'pvc_get_post_views' ) ) {
 			if ( $index === 'type' || $index === 'content' )
 				$_where[$index] = preg_replace( '/[^0-9]/', '', $value );
 			elseif ( $index === 'period' ) {
+				if ( is_string( $value ) && preg_match( "/period\s*=\s*'?total'?/i", $value ) ) {
+					$_where['period'] = [ 'total' ];
+					continue;
+				}
+
 				$values = preg_match_all( '/\d+/', $value, $matches );
 
 				// any values?
@@ -143,8 +176,13 @@ if ( ! function_exists( 'pvc_get_post_views' ) ) {
 				$nop = count( $_where['period'] );
 
 				if ( $nop === 1 ) {
-					$where_clause .= ' AND CAST( period AS SIGNED ) = %d';
-					$numbers[] = (int) $_where['period'][0];
+					if ( $_where['period'][0] === 'total' ) {
+						$where_clause .= ' AND period = %s';
+						$numbers[] = 'total';
+					} else {
+						$where_clause .= ' AND CAST( period AS SIGNED ) = %d';
+						$numbers[] = (int) $_where['period'][0];
+					}
 				} elseif ( $nop === 2 ) {
 					$where_clause .= ' AND CAST( period AS SIGNED ) <= %d AND CAST( period AS SIGNED ) >= %d';
 					$numbers[] = (int) $_where['period'][0];

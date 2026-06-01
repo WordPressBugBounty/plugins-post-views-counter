@@ -4,7 +4,7 @@ Tags: counter, postviews, statistics, analytics, pageviews
 Requires at least: 6.3.0
 Requires PHP: 7.0
 Tested up to: 7.0
-Stable tag: 1.7.11
+Stable tag: 1.7.12
 License: MIT License
 License URI: http://opensource.org/licenses/MIT
 
@@ -91,6 +91,12 @@ If you’ve purchased Post Views Counter Pro, your license includes one year of 
 2. screenshot-2.png
 
 == Changelog ==
+
+= 1.7.12 =
+* Fix: Prevent widget fatal errors when pvc_most_viewed_posts loads before the widgets API is ready.
+* Fix: Refresh dashboard period navigation data for widgets.
+* Fix: Improve email summary recipient validation and persist the separate test recipient setting.
+* Tweak: Constrain total post view lookups to the total period.
 
 = 1.7.11 =
 * New: Weekly email summaries with scheduling, test send, and template-based rendering.
@@ -473,5 +479,5 @@ Initial release
 
 == Upgrade Notice ==
 
-= 1.7.11 =
-Adds weekly email summaries with scheduling, templates, and delivery controls, plus related settings
+= 1.7.12 =
+Fixes widget loading, dashboard period navigation, email recipient handling, and total-period view lookups.

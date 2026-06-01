@@ -2,7 +2,7 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: Post Views Counter\n"
-"POT-Creation-Date: 2026-05-19 22:31+0200\n"
+"POT-Creation-Date: 2026-06-01 16:18+0200\n"
 "PO-Revision-Date: 2015-04-08 18:59+0100\n"
 "Last-Translator: Bartosz Arendt <info@dfactory.eu>\n"
 "Language-Team: dFactory <info@dfactory.eu>\n"
@@ -25,12 +25,12 @@ msgid "Something went wrong. Try again or refresh the page."
 msgstr ""
 
 #: blocks/most-viewed-posts/index.js:1 blocks/post-views/index.js:1
-#: post-views-counter.php:1312 src/blocks/most-viewed-posts/edit.js:40
+#: post-views-counter.php:1313 src/blocks/most-viewed-posts/edit.js:40
 #: src/blocks/post-views/edit.js:14
 msgid "Settings"
 msgstr ""
 
-#: blocks/most-viewed-posts/index.js:1 includes/class-widgets.php:131
+#: blocks/most-viewed-posts/index.js:1 includes/class-widgets.php:156
 #: src/blocks/most-viewed-posts/edit.js:43
 msgid "Title"
 msgstr ""
@@ -48,17 +48,17 @@ msgstr ""
 msgid "Views period"
 msgstr ""
 
-#: blocks/most-viewed-posts/index.js:1 includes/class-widgets.php:161
+#: blocks/most-viewed-posts/index.js:1 includes/class-widgets.php:186
 #: src/blocks/most-viewed-posts/edit.js:84
 msgid "Number of posts to show"
 msgstr ""
 
-#: blocks/most-viewed-posts/index.js:1 includes/class-widgets.php:165
+#: blocks/most-viewed-posts/index.js:1 includes/class-widgets.php:190
 #: src/blocks/most-viewed-posts/edit.js:90
 msgid "No posts message"
 msgstr ""
 
-#: blocks/most-viewed-posts/index.js:1 includes/class-widgets.php:169
+#: blocks/most-viewed-posts/index.js:1 includes/class-widgets.php:194
 #: src/blocks/most-viewed-posts/edit.js:95
 msgid "Order"
 msgstr ""
@@ -107,7 +107,7 @@ msgstr ""
 msgid "Post thumbnail"
 msgstr ""
 
-#: blocks/most-viewed-posts/index.js:1 includes/class-widgets.php:204
+#: blocks/most-viewed-posts/index.js:1 includes/class-widgets.php:229
 #: src/blocks/most-viewed-posts/edit.js:146
 msgid "Thumbnail size"
 msgstr ""
@@ -295,8 +295,8 @@ msgid "You do not have permission to access this page."
 msgstr ""
 
 #: includes/class-dashboard.php:326 includes/class-settings-display.php:104
-#: includes/class-widgets.php:85 includes/functions.php:707
-#: post-views-counter.php:509
+#: includes/class-widgets.php:85 includes/functions.php:745
+#: post-views-counter.php:510
 msgid "Total Views"
 msgstr ""
 
@@ -308,7 +308,7 @@ msgstr ""
 msgid "Views"
 msgstr ""
 
-#: includes/class-dashboard.php:542 includes/functions.php:698
+#: includes/class-dashboard.php:542 includes/functions.php:736
 msgid "No most viewed posts found."
 msgstr ""
 
@@ -912,7 +912,7 @@ msgstr ""
 msgid "Text shown next to the view count."
 msgstr ""
 
-#: includes/class-settings-display.php:95 includes/class-widgets.php:146
+#: includes/class-settings-display.php:95 includes/class-widgets.php:171
 msgid "Views Period"
 msgstr ""
 
@@ -920,7 +920,7 @@ msgstr ""
 msgid "Time range used when displaying the number of views."
 msgstr ""
 
-#: includes/class-settings-display.php:109 includes/class-widgets.php:182
+#: includes/class-settings-display.php:109 includes/class-widgets.php:207
 msgid "Display Style"
 msgstr ""
 
@@ -1026,7 +1026,7 @@ msgid "Display the view count on author archive pages."
 msgstr ""
 
 #: includes/class-settings-display.php:230
-#: includes/class-settings-general.php:127 includes/class-widgets.php:135
+#: includes/class-settings-general.php:127 includes/class-widgets.php:160
 msgid "Post Types"
 msgstr ""
 
@@ -1283,155 +1283,152 @@ msgstr ""
 msgid "Email Content"
 msgstr ""
 
-#: includes/class-settings-emails.php:238
+#: includes/class-settings-emails.php:239
 msgid "Send Test To"
 msgstr ""
 
-#: includes/class-settings-emails.php:246
+#: includes/class-settings-emails.php:247
 msgid "Schedule Status"
 msgstr ""
 
-#: includes/class-settings-emails.php:249
+#: includes/class-settings-emails.php:250
 msgid ""
 "Weekly summaries are scheduled for Monday after the previous full week has "
 "ended."
 msgstr ""
 
-#: includes/class-settings-emails.php:250
+#: includes/class-settings-emails.php:251
 msgid ""
 "Summary emails are scheduled with WordPress cron. Delivery time may vary "
 "depending on site traffic and hosting configuration."
 msgstr ""
 
-#: includes/class-settings-emails.php:255
+#: includes/class-settings-emails.php:256
 msgid "Next Scheduled Email"
 msgstr ""
 
-#: includes/class-settings-emails.php:263
+#: includes/class-settings-emails.php:264
 msgid "Last Sent"
 msgstr ""
 
-#: includes/class-settings-emails.php:271
+#: includes/class-settings-emails.php:272
 msgid "Last Error"
 msgstr ""
 
-#: includes/class-settings-emails.php:286
+#: includes/class-settings-emails.php:287
 msgid "Send email summaries with your most viewed content and view totals."
 msgstr ""
 
-#: includes/class-settings-emails.php:295
+#: includes/class-settings-emails.php:296
 msgid "Choose who should receive your email summaries."
 msgstr ""
 
-#: includes/class-settings-emails.php:304
+#: includes/class-settings-emails.php:305
 msgid "Review scheduling, delivery, and recent email status information."
 msgstr ""
 
-#: includes/class-settings-emails.php:313
+#: includes/class-settings-emails.php:314
 msgid "Customize the subject and message used for content views summaries."
 msgstr ""
 
-#: includes/class-settings-emails.php:323
+#: includes/class-settings-emails.php:324
 msgid ""
 "Send a test using the latest available summary. This does not change the "
 "saved recipient or scheduled delivery."
 msgstr ""
 
-#: includes/class-settings-emails.php:335
+#: includes/class-settings-emails.php:337
 msgid "email@example.com"
 msgstr ""
 
-#: includes/class-settings-emails.php:335
+#: includes/class-settings-emails.php:337
 msgid "Test email recipient"
 msgstr ""
 
-#: includes/class-settings-emails.php:336
+#: includes/class-settings-emails.php:338
 msgid "Send Test Email"
 msgstr ""
 
-#: includes/class-settings-emails.php:336
+#: includes/class-settings-emails.php:338
 msgid "Sending..."
 msgstr ""
 
-#: includes/class-settings-emails.php:337
-msgid "Enter an email address for this test only."
-msgstr ""
-
-#: includes/class-settings-emails.php:355
+#: includes/class-settings-emails.php:356
 msgid "Sorry, you are not allowed to do that."
 msgstr ""
 
-#: includes/class-settings-emails.php:394
+#: includes/class-settings-emails.php:395
+#: includes/class-settings-emails.php:494
 msgid "Enter a valid test recipient email address."
 msgstr ""
 
-#: includes/class-settings-emails.php:416
+#: includes/class-settings-emails.php:417
 msgid ""
 "There is not enough tracked data from the latest complete week to send a "
 "real test summary yet."
 msgstr ""
 
-#: includes/class-settings-emails.php:436
+#: includes/class-settings-emails.php:437
 msgid "The summary test email was sent successfully."
 msgstr ""
 
-#: includes/class-settings-emails.php:444
+#: includes/class-settings-emails.php:445
 #, php-format
 msgid "The test email could not be sent. %s"
 msgstr ""
 
-#: includes/class-settings-emails.php:445
+#: includes/class-settings-emails.php:446
 msgid ""
 "The test email could not be sent. Check your WordPress mail configuration "
 "and try again."
 msgstr ""
 
-#: includes/class-settings-emails.php:462
-msgid "Recipient email is required while the views summary email is enabled."
-msgstr ""
-
-#: includes/class-settings-emails.php:468
+#: includes/class-settings-emails.php:463
 msgid "Enter a valid recipient email address for the views summary email."
 msgstr ""
 
-#: includes/class-settings-emails.php:487
+#: includes/class-settings-emails.php:469
+msgid "Recipient email is required while the views summary email is enabled."
+msgstr ""
+
+#: includes/class-settings-emails.php:559
 msgid "Minimum tracked views cannot be lower than 0."
 msgstr ""
 
-#: includes/class-settings-emails.php:516
+#: includes/class-settings-emails.php:588
 #, php-format
 msgid ""
 "%1$s contained tags that are not available in this field. Removed tags: "
 "%2$s. Supported tags here: %3$s"
 msgstr ""
 
-#: includes/class-settings-emails.php:639
+#: includes/class-settings-emails.php:711
 msgid "Customize the subject line for summary emails."
 msgstr ""
 
-#: includes/class-settings-emails.php:641
+#: includes/class-settings-emails.php:713
 #, php-format
 msgid "Use supported subject tags such as %1$s and %2$s."
 msgstr ""
 
-#: includes/class-settings-emails.php:655
+#: includes/class-settings-emails.php:727
 msgid "Customize the main message sent with each email summary."
 msgstr ""
 
-#: includes/class-settings-emails.php:657
+#: includes/class-settings-emails.php:729
 #, php-format
 msgid "Use supported content tags such as %s."
 msgstr ""
 
-#: includes/class-settings-emails.php:742
+#: includes/class-settings-emails.php:814
 msgid "Not sent yet."
 msgstr ""
 
-#: includes/class-settings-emails.php:759
+#: includes/class-settings-emails.php:831
 msgid "Not scheduled."
 msgstr ""
 
-#: includes/class-settings-emails.php:772
+#: includes/class-settings-emails.php:844
 msgid "No email errors recorded yet."
 msgstr ""
 
@@ -1520,7 +1517,8 @@ msgstr ""
 #: includes/class-settings-general.php:162
 msgid ""
 "Track views on the front page, post type archives, date archives, search "
-"results, and 404 pages."
+"results, 404 pages, and WordPress authentication pages such as login, "
+"registration, and password reset."
 msgstr ""
 
 #: includes/class-settings-general.php:171
@@ -2106,70 +2104,70 @@ msgstr ""
 msgid "No most viewed posts found"
 msgstr ""
 
-#: includes/class-widgets.php:195
+#: includes/class-widgets.php:220
 msgid "Display post views?"
 msgstr ""
 
-#: includes/class-widgets.php:197
+#: includes/class-widgets.php:222
 msgid "Display post excerpt?"
 msgstr ""
 
-#: includes/class-widgets.php:199
+#: includes/class-widgets.php:224
 msgid "Display post author?"
 msgstr ""
 
-#: includes/class-widgets.php:201
+#: includes/class-widgets.php:226
 msgid "Display post thumbnail?"
 msgstr ""
 
-#: post-views-counter.php:765
+#: post-views-counter.php:766
 #, php-format
 msgid ""
 "Hey, you've been using <strong>Post Views Counter</strong> for more than %s."
 msgstr ""
 
-#: post-views-counter.php:765
+#: post-views-counter.php:766
 msgid ""
 "Could you please do me a BIG favor and give it a 5-star rating on WordPress "
 "to help us spread the word and boost our motivation."
 msgstr ""
 
-#: post-views-counter.php:765
+#: post-views-counter.php:766
 msgid "Your help is much appreciated. Thank you very much"
 msgstr ""
 
-#: post-views-counter.php:765
+#: post-views-counter.php:766
 msgid "founder of"
 msgstr ""
 
-#: post-views-counter.php:765
+#: post-views-counter.php:766
 msgid "Ok, you deserve it"
 msgstr ""
 
-#: post-views-counter.php:765
+#: post-views-counter.php:766
 msgid "Nope, maybe later"
 msgstr ""
 
-#: post-views-counter.php:765
+#: post-views-counter.php:766
 msgid "I already did"
 msgstr ""
 
-#: post-views-counter.php:1139
+#: post-views-counter.php:1140
 msgid "Are you sure you want to reset these settings to defaults?"
 msgstr ""
 
-#: post-views-counter.php:1140
+#: post-views-counter.php:1141
 msgid "Are you sure you want to delete all existing data?"
 msgstr ""
 
-#: post-views-counter.php:1141
+#: post-views-counter.php:1142
 msgid "Are you sure you want to import views now?"
 msgstr ""
 
-#: post-views-counter.php:1143
+#: post-views-counter.php:1144
 msgid "The test email request did not return a valid response."
 msgstr ""
 
-#: post-views-counter.php:1144
+#: post-views-counter.php:1145
 msgid "The test email request could not be completed. Please try again."
 msgstr ""

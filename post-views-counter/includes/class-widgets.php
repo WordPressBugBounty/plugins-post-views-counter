@@ -99,6 +99,21 @@ class Post_Views_Counter_List_Widget extends WP_Widget {
 	}
 
 	/**
+	 * Ensure template helper functions are available for early widget renders.
+	 *
+	 * @return bool
+	 */
+	private function maybe_load_template_functions() {
+		if ( function_exists( 'pvc_most_viewed_posts' ) )
+			return true;
+
+		if ( defined( 'POST_VIEWS_COUNTER_PATH' ) )
+			include_once( POST_VIEWS_COUNTER_PATH . 'includes/functions.php' );
+
+		return function_exists( 'pvc_most_viewed_posts' );
+	}
+
+	/**
 	 * Display widget.
 	 *
 	 * @param array $args
@@ -114,6 +129,16 @@ class Post_Views_Counter_List_Widget extends WP_Widget {
 		$instance['title'] = apply_filters( 'widget_title', $instance['title'], $instance, $this->id_base );
 
 		$html = $args['before_widget'] . ( ! empty( $instance['title'] ) ? $args['before_title'] . esc_html( $instance['title'] ) . $args['after_title'] : '' );
+
+		if ( ! $this->maybe_load_template_functions() ) {
+			$html .= ! empty( $instance['no_posts_message'] ) ? $instance['no_posts_message'] : $this->pvc_defaults['no_posts_message'];
+			$html .= $args['after_widget'];
+
+			echo wp_kses_post( $html );
+
+			return;
+		}
+
 		$html .= pvc_most_viewed_posts( $instance, false );
 		$html .= $args['after_widget'];
 

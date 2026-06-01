@@ -159,7 +159,7 @@ class Post_Views_Counter_Settings_General {
 				'title'			=> __( 'Other Pages', 'post-views-counter' ),
 				'section'		=> 'post_views_counter_general_tracking_targets',
 				'type'			=> 'boolean',
-				'label'			=> __( 'Track views on the front page, post type archives, date archives, search results, and 404 pages.', 'post-views-counter' ),
+				'label'			=> __( 'Track views on the front page, post type archives, date archives, search results, 404 pages, and WordPress authentication pages such as login, registration, and password reset.', 'post-views-counter' ),
 				'class'			=> 'pvc-pro',
 				'disabled'		=> true,
 				'skip_saving'	=> true,

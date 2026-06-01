@@ -233,13 +233,14 @@ class Post_Views_Counter_Settings_Emails {
 				'description'	=> $this->get_content_template_description(),
 				'validate'		=> [ $this, 'validate_template_text' ]
 			],
-			'test_email_scaffold' => [
+			'test_recipient' => [
+				'field_key'		=> 'test_recipient',
 				'tab'			=> 'emails',
 				'title'			=> __( 'Send Test To', 'post-views-counter' ),
 				'section'		=> 'post_views_counter_emails_test',
 				'type'			=> 'custom',
-				'skip_saving'	=> true,
-				'callback'		=> [ $this, 'setting_test_email_scaffold' ]
+				'callback'		=> [ $this, 'setting_test_email_scaffold' ],
+				'validate'		=> [ $this, 'validate_test_recipient' ]
 			],
 			'schedule_status' => [
 				'tab'			=> 'emails',
@@ -330,11 +331,11 @@ class Post_Views_Counter_Settings_Emails {
 	 */
 	public function setting_test_email_scaffold( $field ) {
 		$default_recipient = $this->get_test_email_default_recipient();
+		$input_name = ! empty( $field['name'] ) ? $field['name'] : 'post_views_counter_settings_emails[test_recipient]';
 		$nonce = wp_create_nonce( 'pvc_send_test_email_ajax' );
 		$html = '<div class="pvc-email-test-scaffold">';
-		$html .= '<p><input id="pvc-test-email-recipient" type="email" class="regular-text" name="pvc_test_email_recipient" value="' . esc_attr( $default_recipient ) . '" placeholder="' . esc_attr__( 'email@example.com', 'post-views-counter' ) . '" aria-label="' . esc_attr__( 'Test email recipient', 'post-views-counter' ) . '" /></p>';
+		$html .= '<p><input id="pvc-test-email-recipient" type="email" class="regular-text" name="' . esc_attr( $input_name ) . '" value="' . esc_attr( $default_recipient ) . '" placeholder="' . esc_attr__( 'email@example.com', 'post-views-counter' ) . '" aria-label="' . esc_attr__( 'Test email recipient', 'post-views-counter' ) . '" /></p>';
 		$html .= '<p><button type="button" class="button outline pvc-send-test-email" data-pvc-email-test-nonce="' . esc_attr( $nonce ) . '" data-default-label="' . esc_attr__( 'Send Test Email', 'post-views-counter' ) . '" data-sending-label="' . esc_attr__( 'Sending...', 'post-views-counter' ) . '">' . esc_html__( 'Send Test Email', 'post-views-counter' ) . '</button></p>';
-		$html .= '<p class="description">' . esc_html__( 'Enter an email address for this test only.', 'post-views-counter' ) . '</p>';
 		$html .= '</div>';
 
 		return $html;
@@ -454,23 +455,94 @@ class Post_Views_Counter_Settings_Emails {
 	 * @return string
 	 */
 	public function validate_recipient( $value, $field ) {
-		$value = sanitize_email( $value );
+		$recipient = $this->prepare_single_email_recipient( $value );
 		$enabled = $this->is_emails_enabled_in_request();
 		$previous = $this->get_previous_value( $field, $this->pvc->get_default_emails_settings()['recipient'] );
 
-		if ( $enabled && $value === '' ) {
-			add_settings_error( 'post_views_counter_settings_emails', 'pvc_emails_recipient_required', __( 'Recipient email is required while the views summary email is enabled.', 'post-views-counter' ), 'error' );
-
-			return $previous;
-		}
-
-		if ( $value !== '' && ! is_email( $value ) ) {
+		if ( ! $recipient['is_valid'] ) {
 			add_settings_error( 'post_views_counter_settings_emails', 'pvc_emails_recipient_invalid', __( 'Enter a valid recipient email address for the views summary email.', 'post-views-counter' ), 'error' );
 
 			return $previous;
 		}
 
-		return $value;
+		if ( $enabled && $recipient['is_empty'] ) {
+			add_settings_error( 'post_views_counter_settings_emails', 'pvc_emails_recipient_required', __( 'Recipient email is required while the views summary email is enabled.', 'post-views-counter' ), 'error' );
+
+			return $previous;
+		}
+
+		return $recipient['email'];
+	}
+
+	/**
+	 * Validate saved test recipient.
+	 *
+	 * @param array $input
+	 * @param array $field
+	 * @return array
+	 */
+	public function validate_test_recipient( $input, $field ) {
+		$input = is_array( $input ) ? $input : [];
+		$field_key = ! empty( $field['field_key'] ) ? sanitize_key( $field['field_key'] ) : 'test_recipient';
+		$previous = sanitize_email( (string) $this->get_previous_value( $field, '' ) );
+		$recipient = $this->prepare_single_email_recipient( isset( $input[$field_key] ) ? $input[$field_key] : '' );
+
+		if ( ! is_email( $previous ) )
+			$previous = '';
+
+		if ( ! $recipient['is_valid'] ) {
+			add_settings_error( 'post_views_counter_settings_emails', 'pvc_emails_test_recipient_invalid', __( 'Enter a valid test recipient email address.', 'post-views-counter' ), 'error' );
+
+			$input[$field_key] = $previous;
+
+			return $input;
+		}
+
+		$input[$field_key] = $recipient['email'];
+
+		return $input;
+	}
+
+	/**
+	 * Prepare a single recipient email value.
+	 *
+	 * @param mixed $value
+	 * @return array
+	 */
+	private function prepare_single_email_recipient( $value ) {
+		if ( is_array( $value ) ) {
+			return [
+				'email'		=> '',
+				'is_empty'	=> false,
+				'is_valid'	=> false
+			];
+		}
+
+		$raw_value = trim( (string) $value );
+
+		if ( $raw_value === '' ) {
+			return [
+				'email'		=> '',
+				'is_empty'	=> true,
+				'is_valid'	=> true
+			];
+		}
+
+		if ( preg_match( '/[,;\r\n]|\s/', $raw_value ) ) {
+			return [
+				'email'		=> '',
+				'is_empty'	=> false,
+				'is_valid'	=> false
+			];
+		}
+
+		$email = sanitize_email( $raw_value );
+
+		return [
+			'email'		=> $email,
+			'is_empty'	=> false,
+			'is_valid'	=> (bool) is_email( $email )
+		];
 	}
 
 	/**
@@ -793,6 +865,11 @@ class Post_Views_Counter_Settings_Emails {
 	 * @return string
 	 */
 	private function get_test_email_default_recipient() {
+		$test_recipient = ! empty( $this->pvc->options['emails']['test_recipient'] ) ? sanitize_email( $this->pvc->options['emails']['test_recipient'] ) : '';
+
+		if ( is_email( $test_recipient ) )
+			return $test_recipient;
+
 		$recipient = ! empty( $this->pvc->options['emails']['recipient'] ) ? sanitize_email( $this->pvc->options['emails']['recipient'] ) : '';
 
 		if ( is_email( $recipient ) )
