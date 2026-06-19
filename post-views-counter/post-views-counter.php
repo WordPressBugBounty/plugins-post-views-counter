@@ -2,7 +2,7 @@
 /*
 Plugin Name: Post Views Counter
 Description: Post Views Counter allows you to collect and display how many times a post, page, or other content has been viewed in a simple, fast and reliable way.
-Version: 1.7.12
+Version: 1.7.13
 Author: dFactory
 Author URI: https://dfactory.co/
 Plugin URI: https://postviewscounter.com/
@@ -30,7 +30,7 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 	 * Post Views Counter final class.
 	 *
 	 * @class Post_Views_Counter
-	 * @version	1.7.12
+	 * @version	1.7.13
 	 */
 	final class Post_Views_Counter {
 
@@ -143,7 +143,7 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 				],
 				'schedule_version'		=> 1
 			],
-			'version'	=> '1.7.12'
+			'version'	=> '1.7.13'
 		];
 
 		// instances
@@ -1184,18 +1184,15 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 
 				wp_enqueue_style( 'pvc-admin-post-style' );
 
-				// woocommerce
-				if ( get_post_type() !== 'product' ) {
-					wp_enqueue_script( 'pvc-admin-quick-edit' );
+				wp_enqueue_script( 'pvc-admin-quick-edit' );
 
-					// prepare script data
-					$script_data = [
-						'nonce'			=> wp_create_nonce( 'pvc_save_bulk_post_views' ),
-						'wpVersion59'	=> version_compare( $wp_version, '5.9', '>=' )
-					];
+				// prepare script data
+				$script_data = [
+					'nonce'			=> wp_create_nonce( 'pvc_save_bulk_post_views' ),
+					'wpVersion59'	=> version_compare( $wp_version, '5.9', '>=' )
+				];
 
-					wp_add_inline_script( 'pvc-admin-quick-edit', 'var pvcArgsQuickEdit = ' . wp_json_encode( $script_data ) . ";\n", 'before' );
-				}
+				wp_add_inline_script( 'pvc-admin-quick-edit', 'var pvcArgsQuickEdit = ' . wp_json_encode( $script_data ) . ";\n", 'before' );
 			// widgets
 			} elseif ( $page === 'widgets.php' )
 				wp_enqueue_script( 'pvc-admin-widgets', POST_VIEWS_COUNTER_URL . '/js/admin-widgets.js', [ 'jquery' ], $this->defaults['version'] );

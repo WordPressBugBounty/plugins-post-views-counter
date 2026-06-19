@@ -4,7 +4,7 @@ Tags: counter, postviews, statistics, analytics, pageviews
 Requires at least: 6.3.0
 Requires PHP: 7.0
 Tested up to: 7.0
-Stable tag: 1.7.12
+Stable tag: 1.7.13
 License: MIT License
 License URI: http://opensource.org/licenses/MIT
 
@@ -91,6 +91,9 @@ If you’ve purchased Post Views Counter Pro, your license includes one year of 
 2. screenshot-2.png
 
 == Changelog ==
+
+= 1.7.13 =
+* Fix: Save post views correctly from WooCommerce product Quick Edit.
 
 = 1.7.12 =
 * Fix: Prevent widget fatal errors when pvc_most_viewed_posts loads before the widgets API is ready.
@@ -479,5 +482,5 @@ Initial release
 
 == Upgrade Notice ==
 
-= 1.7.12 =
-Fixes widget loading, dashboard period navigation, email recipient handling, and total-period view lookups.
+= 1.7.13 =
+Fixes WooCommerce product Quick Edit view saving.

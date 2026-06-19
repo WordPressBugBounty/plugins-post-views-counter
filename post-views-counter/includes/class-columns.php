@@ -26,6 +26,27 @@ class Post_Views_Counter_Columns {
 		add_action( 'quick_edit_custom_box', [ $this, 'quick_edit_custom_box' ], 10, 2 );
 		add_action( 'wp_ajax_save_bulk_post_views', [ $this, 'save_bulk_post_views' ] );
 	}
+
+	/**
+	 * Sanitize manual post views input.
+	 *
+	 * @param mixed $value
+	 * @return int|null
+	 */
+	private function sanitize_post_views_input( $value ) {
+		if ( ! is_scalar( $value ) )
+			return null;
+
+		$value = trim( wp_unslash( (string) $value ) );
+
+		if ( $value === '' || ! is_numeric( $value ) )
+			return null;
+
+		$count = (int) $value;
+
+		return $count < 0 ? 0 : $count;
+	}
+
 	/**
 	 * Output post views for single post.
 	 *
@@ -109,11 +130,9 @@ class Post_Views_Counter_Columns {
 		if ( ! isset( $_POST['post_views'] ) )
 			return;
 
-		// cast numeric post views
-		$post_views = (int) $_POST['post_views'];
+		$post_views = $this->sanitize_post_views_input( $_POST['post_views'] );
 
-		// unchanged post views value?
-		if ( isset( $_POST['current_post_views'] ) && $post_views === (int) $_POST['current_post_views'] )
+		if ( is_null( $post_views ) )
 			return;
 
 		// get main instance
@@ -143,7 +162,16 @@ class Post_Views_Counter_Columns {
 			return;
 
 		// validate data
-		if ( ! isset( $_POST['pvc_nonce'] ) || ! wp_verify_nonce( $_POST['pvc_nonce'], 'post_views_count' ) )
+		if ( ! isset( $_POST['pvc_nonce'] ) || ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['pvc_nonce'] ) ), 'post_views_count' ) )
+			return;
+
+		$current_post_views = null;
+
+		if ( isset( $_POST['current_post_views'] ) )
+			$current_post_views = $this->sanitize_post_views_input( $_POST['current_post_views'] );
+
+		// unchanged post views value?
+		if ( ! is_null( $current_post_views ) && $post_views === $current_post_views )
 			return;
 
 		// update post views
@@ -275,7 +303,7 @@ class Post_Views_Counter_Columns {
 	public function add_new_column_content( $column_name, $id ) {
 		if ( $column_name === 'post_views' ) {
 			// get total post views
-			$count = pvc_get_post_views( $id );
+			$count = (int) pvc_get_post_views( $id );
 			
 			// check if user can see stats
 			if ( apply_filters( 'pvc_admin_display_post_views', true, $id ) === false ) {
@@ -301,7 +329,7 @@ class Post_Views_Counter_Columns {
 			}
 
 			// clickable link (modal opening handled via JavaScript)
-			echo '<a href="#" class="pvc-view-chart" data-post-id="' . esc_attr( $id ) . '" data-post-title="' . esc_attr( $post_title ) . '">' . esc_html( $count ) . '</a>';
+			echo '<a href="#" class="pvc-view-chart" data-post-id="' . esc_attr( $id ) . '" data-post-title="' . esc_attr( $post_title ) . '" data-post-views="' . esc_attr( $count ) . '">' . esc_html( $count ) . '</a>';
 		}
 	}
 
@@ -364,28 +392,19 @@ class Post_Views_Counter_Columns {
 	/**
 	 * Bulk save post views.
 	 *
-	 * @global object $wpdb
-	 *
 	 * @return void
 	 */
 	function save_bulk_post_views() {
-		global $wpdb;
+		$pvc = Post_Views_Counter();
 
 		// check nonce
-		if ( ! isset( $_POST['nonce'] ) || ! wp_verify_nonce( $_POST['nonce'], 'pvc_save_bulk_post_views' ) )
+		if ( ! isset( $_POST['nonce'] ) || ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['nonce'] ) ), 'pvc_save_bulk_post_views' ) )
 			exit;
 
-		$count = null;
-
-		if ( isset( $_POST['post_views'] ) && is_numeric( trim( $_POST['post_views'] ) ) ) {
-			$count = (int) $_POST['post_views'];
-
-			if ( $count < 0 )
-				$count = 0;
-		}
+		$count = isset( $_POST['post_views'] ) ? $this->sanitize_post_views_input( $_POST['post_views'] ) : null;
 
 		// check post ids
-		$post_ids = ( ! empty( $_POST['post_ids'] ) && is_array( $_POST['post_ids'] ) ) ? array_map( 'absint', $_POST['post_ids'] ) : [];
+		$post_ids = ( ! empty( $_POST['post_ids'] ) && is_array( $_POST['post_ids'] ) ) ? array_map( 'absint', wp_unslash( $_POST['post_ids'] ) ) : [];
 
 		if ( is_null( $count ) )
 			exit;
@@ -400,6 +419,8 @@ class Post_Views_Counter_Columns {
 		if ( $allow_edit === false || $allow_edit_condition === false )
 			exit;
 
+		$post_types = (array) $pvc->options['general']['post_types_count'];
+
 		// any post ids?
 		if ( ! empty( $post_ids ) ) {
 			foreach ( $post_ids as $post_id ) {
@@ -407,8 +428,11 @@ class Post_Views_Counter_Columns {
 				if ( ! current_user_can( 'edit_post', $post_id ) )
 					continue;
 
-				// insert or update db post views count
-				$wpdb->query( $wpdb->prepare( "INSERT INTO " . $wpdb->prefix . "post_views (id, type, period, count) VALUES (%d, %d, %s, %d) ON DUPLICATE KEY UPDATE count = %d", $post_id, 4, 'total', $count, $count ) );
+				if ( ! in_array( get_post_type( $post_id ), $post_types, true ) )
+					continue;
+
+				if ( pvc_update_post_views( $post_id, $count ) !== false )
+					do_action( 'pvc_after_update_post_views_count', $post_id );
 			}
 		}
 

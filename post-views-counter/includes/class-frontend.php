@@ -42,18 +42,21 @@ class Post_Views_Counter_Frontend {
 	 */
 	public function post_views_shortcode( $args ) {
 		$views = 0;
+		$options = Post_Views_Counter()->options['display'];
 
 		$defaults = [
-			'id'	=> get_the_ID(),
-			'type'	=> 'post'
+			'id'		=> get_the_ID(),
+			'type'		=> 'post',
+			'period'	=> $options['display_period']
 		];
 
 		// combine attributes
 		$atts = apply_filters( 'pvc_post_views_shortcode_atts', shortcode_atts( $defaults, $args ) );
+		$period = isset( $atts['period'] ) ? sanitize_key( $atts['period'] ) : sanitize_key( $defaults['period'] );
 
 		// default type?
 		if ( $atts['type'] === 'post' )
-			$views = function_exists( 'pvc_post_views' ) ? pvc_post_views( $atts['id'], false ) : 0;
+			$views = function_exists( 'pvc_post_views' ) ? pvc_post_views( $atts['id'], false, $period ) : 0;
 
 		return apply_filters( 'pvc_post_views_shortcode', $views, $atts );
 	}
