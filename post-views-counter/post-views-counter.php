@@ -2,7 +2,7 @@
 /*
 Plugin Name: Post Views Counter
 Description: Post Views Counter allows you to collect and display how many times a post, page, or other content has been viewed in a simple, fast and reliable way.
-Version: 1.7.13
+Version: 1.7.14
 Author: dFactory
 Author URI: https://dfactory.co/
 Plugin URI: https://postviewscounter.com/
@@ -30,7 +30,7 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 	 * Post Views Counter final class.
 	 *
 	 * @class Post_Views_Counter
-	 * @version	1.7.13
+	 * @version	1.7.14
 	 */
 	final class Post_Views_Counter {
 
@@ -143,7 +143,7 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 				],
 				'schedule_version'		=> 1
 			],
-			'version'	=> '1.7.13'
+			'version'	=> '1.7.14'
 		];
 
 		// instances
@@ -563,10 +563,16 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 			if ( ! in_array( $context, $allowed_contexts, true ) )
 				$context = 'free';
 
-			$version = ! empty( $this->defaults['version'] ) ? (string) $this->defaults['version'] : (string) get_option( 'post_views_counter_version', '' );
+			if ( $context === 'free' ) {
+				$source = 'post-views-counter-lite';
+				$version = ! empty( $this->defaults['version'] ) ? (string) $this->defaults['version'] : (string) get_option( 'post_views_counter_version', '' );
+			} else {
+				$source = 'post-views-counter-pro';
+				$version = (string) get_option( 'post_views_counter_pro_version', '' );
+			}
 
 			$query_args = [
-				'utm_source' => 'post-views-counter-lite',
+				'utm_source' => $source,
 				'utm_medium' => $medium,
 				'utm_campaign' => $campaign,
 				'utm_content' => $content,
@@ -1041,13 +1047,22 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 				wp_clear_scheduled_hook( 'pvc_weekly_content_summary_send' );
 
 			if ( $multi === true ) {
-				$options = get_option( 'post_views_counter_settings_other' );
-				$check = $options['deactivation_delete'];
+				$options = get_option( 'post_views_counter_settings_other', [] );
+				$check = is_array( $options ) && ! empty( $options['deactivation_delete'] );
 			} else
 				$check = $this->options['other']['deactivation_delete'];
 
 			// delete options if needed
 			if ( $check ) {
+				// Give a compatible Pro client one non-blocking opportunity to
+				// release the remote license before Free removes shared settings.
+				if ( function_exists( 'Post_Views_Counter_Pro' ) ) {
+					$pvcp = Post_Views_Counter_Pro();
+
+					if ( isset( $pvcp->settings ) && method_exists( $pvcp->settings, 'delete_license_state_on_deactivation' ) )
+						$pvcp->settings->delete_license_state_on_deactivation();
+				}
+
 				// delete options
 				delete_option( 'post_views_counter_settings_general' );
 				delete_option( 'post_views_counter_settings_display' );

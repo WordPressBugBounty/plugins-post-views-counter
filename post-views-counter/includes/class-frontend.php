@@ -51,7 +51,8 @@ class Post_Views_Counter_Frontend {
 		];
 
 		// combine attributes
-		$atts = apply_filters( 'pvc_post_views_shortcode_atts', shortcode_atts( $defaults, $args ) );
+		$atts = shortcode_atts( $defaults, $args );
+		$atts = apply_filters( 'pvc_post_views_shortcode_atts', $atts, $args, $defaults );
 		$period = isset( $atts['period'] ) ? sanitize_key( $atts['period'] ) : sanitize_key( $defaults['period'] );
 
 		// default type?

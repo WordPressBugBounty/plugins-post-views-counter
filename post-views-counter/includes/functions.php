@@ -659,7 +659,7 @@ if ( ! function_exists( 'pvc_post_views' ) ) {
 
 		$html = apply_filters(
 			'pvc_post_views_html',
-			'<div class="' . esc_attr( $class ) . '">
+			'<div class="' . esc_attr( $class ) . '" data-pvc-type="post" data-pvc-id="' . esc_attr( $post_id ) . '">
 				' . ( $options['display_style']['icon'] ? $icon : '' )
 				. ( $options['display_style']['text'] ? '<span class="post-views-label">' . esc_html( $label ) . '</span> ' : '' )
 				. '<span class="post-views-count">' . $views . '</span>

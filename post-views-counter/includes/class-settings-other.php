@@ -293,6 +293,7 @@ class Post_Views_Counter_Settings_Other {
 			$value = isset( $row['value'] ) ? $row['value'] : '';
 			$active = isset( $row['active'] ) ? (bool) $row['active'] : null;
 			$tables = isset( $row['tables'] ) ? $row['tables'] : null;
+			$actions = isset( $row['actions'] ) && is_array( $row['actions'] ) ? $row['actions'] : [];
 
 			echo '<tr>';
 				echo '<th scope="row">' . esc_html( $label ) . '</th>';
@@ -327,7 +328,25 @@ class Post_Views_Counter_Settings_Other {
 			// handle plain text value
 			} else {
 				echo wp_kses( $value, [ 'br' => [] ] );
-			}				echo '</td>';
+			}
+
+			foreach ( $actions as $action ) {
+				if ( ! is_array( $action ) )
+					continue;
+
+				$action_label = isset( $action['label'] ) && is_scalar( $action['label'] ) ? trim( (string) $action['label'] ) : '';
+				$action_href = isset( $action['href'] ) && is_scalar( $action['href'] ) ? esc_url( (string) $action['href'] ) : '';
+
+				if ( $action_label === '' || $action_href === '' )
+					continue;
+
+				$action_classes = isset( $action['class'] ) && is_string( $action['class'] ) ? preg_split( '/\s+/', trim( $action['class'] ) ) : [];
+				$action_classes = array_values( array_unique( array_filter( array_map( 'sanitize_html_class', $action_classes ) ) ) );
+
+				echo '<p><a href="' . $action_href . '"' . ( ! empty( $action_classes ) ? ' class="' . esc_attr( implode( ' ', $action_classes ) ) . '"' : '' ) . '>' . esc_html( $action_label ) . '</a></p>';
+			}
+
+			echo '</td>';
 			echo '</tr>';
 		}
 		echo '</tbody></table>';
@@ -336,7 +355,8 @@ class Post_Views_Counter_Settings_Other {
 	/**
 	 * Prepare an array with plugin status rows.
 	 *
-	 * Rows should be associative arrays with: label, value (string) and optional active (bool) key.
+	 * Rows should be associative arrays with: label, value (string), optional active (bool),
+	 * and optional actions (arrays containing label, href, and class) keys.
 	 * The returned rows will be filtered by 'pvc_plugin_status_rows' which allows extensions to add/modify rows.
 	 *
 	 * @return array

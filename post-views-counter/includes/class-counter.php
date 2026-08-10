@@ -41,44 +41,73 @@ class Post_Views_Counter_Counter {
 	}
 
 	/**
+	 * Return a fresh nonce for the manual post queue.
+	 *
+	 * The nonce is deliberately minted at request time instead of being embedded in cacheable
+	 * page markup. This preserves the existing queue request contract while allowing cached pages
+	 * to keep working after the normal WordPress nonce lifetime expires.
+	 *
+	 * @return void
+	 */
+	public function get_queue_runtime_data() {
+		if ( function_exists( 'nocache_headers' ) )
+			nocache_headers();
+
+		wp_send_json_success( [
+			'runtime' => [
+				'queueNonce' => wp_create_nonce( 'pvc-view-posts' )
+			]
+		] );
+	}
+
+	/**
 	 * Run manual pvc_view_post queue.
 	 *
 	 * @return void
 	 */
 	public function queue_count() {
-		// check conditions
-		if ( ! isset( $_POST['action'], $_POST['ids'], $_POST['pvc_nonce'] ) || ! wp_verify_nonce( $_POST['pvc_nonce'], 'pvc-view-posts' ) || $_POST['ids'] === '' || ! is_string( $_POST['ids'] ) )
-			exit;
+		// missing or invalid parameters?
+		if ( ! isset( $_POST['action'], $_POST['ids'], $_POST['pvc_nonce'] ) || $_POST['ids'] === '' || ! is_string( $_POST['ids'] ) )
+			wp_send_json_error( [
+				'code' => 'pvc_missing_parameters',
+				'message' => __( 'Missing or invalid queue parameters.', 'post-views-counter' )
+			], 400 );
+
+		// invalid nonce?
+		if ( ! wp_verify_nonce( $_POST['pvc_nonce'], 'pvc-view-posts' ) )
+			wp_send_json_error( [
+				'code' => 'pvc_invalid_nonce',
+				'message' => __( 'Security check failed.', 'post-views-counter' )
+			], 403 );
 
 		// get post ids
-		$ids = explode( ',', $_POST['ids'] );
+		$ids = array_values( array_filter( array_map( 'intval', explode( ',', $_POST['ids'] ) ), function( $id ) {
+			return $id > 0;
+		} ) );
 
 		$counted = [];
 
-		if ( ! empty( $ids ) ) {
-			$ids = array_filter( array_map( 'intval', $ids ) );
+		if ( empty( $ids ) )
+			wp_send_json_error( [
+				'code' => 'pvc_invalid_post_ids',
+				'message' => __( 'No valid post IDs were provided.', 'post-views-counter' )
+			], 400 );
 
-			if ( ! empty( $ids ) ) {
-				// turn on queue mode
-				$this->queue_mode = true;
+		// turn on queue mode
+		$this->queue_mode = true;
 
-				foreach ( $ids as $id ) {
-					$counted[$id] = ! ( $this->check_post( $id ) === null );
-				}
-
-				// turn off queue mode
-				$this->queue_mode = false;
-			}
+		foreach ( $ids as $id ) {
+			$counted[$id] = ! ( $this->check_post( $id ) === null );
 		}
 
-		echo wp_json_encode(
-			[
-				'post_ids'	=> $ids,
-				'counted'	=> $counted
-			]
-		);
+		// turn off queue mode
+		$this->queue_mode = false;
 
-		exit;
+		// preserve the existing flat success response contract
+		wp_send_json( [
+			'post_ids'	=> $ids,
+			'counted'	=> $counted
+		] );
 	}
 
 	/**
@@ -99,7 +128,7 @@ class Post_Views_Counter_Counter {
 			echo "
 			<script>
 				( function( window, document, undefined ) {
-					document.addEventListener( 'DOMContentLoaded', function() {
+					let pvcInitManualCounter = function() {
 						let pvcLoadManualCounter = function( url, counter ) {
 							let pvcScriptTag = document.createElement( 'script' );
 
@@ -115,23 +144,37 @@ class Post_Views_Counter_Counter {
 						let pvcExecuteManualCounter = function() {
 							let pvcManualCounterArgs = {
 								url: '" . esc_url( admin_url( 'admin-ajax.php' ) ) . "',
-								nonce: '" . wp_create_nonce( 'pvc-view-posts' ) . "',
+								runtimeAction: 'pvc-queue-runtime',
 								ids: '" . implode( ',', $this->queue ) . "'
 							};
 
-							// main javascript file was loaded?
-							if ( typeof PostViewsCounter !== 'undefined' && PostViewsCounter.promise !== null ) {
-								PostViewsCounter.promise.then( function() {
+							let pvcPendingRequest = null;
+
+							if ( typeof PostViewsCounter !== 'undefined' )
+								pvcPendingRequest = PostViewsCounter.promise || null;
+							else if ( typeof PostViewsCounterPro !== 'undefined' )
+								pvcPendingRequest = PostViewsCounterPro.countPromise || PostViewsCounterPro.bootstrapPromise || PostViewsCounterPro.promise || null;
+
+							// wait for the main counter request when one is active
+							if ( pvcPendingRequest && typeof pvcPendingRequest.then === 'function' ) {
+								pvcPendingRequest.then( function() {
+									PostViewsCounterManual.init( pvcManualCounterArgs );
+								}, function() {
 									PostViewsCounterManual.init( pvcManualCounterArgs );
 								} );
-							// PostViewsCounter is undefined or promise is null
+							// PostViewsCounter is undefined or has no active request
 							} else {
 								PostViewsCounterManual.init( pvcManualCounterArgs );
 							}
 						}
 
-						pvcLoadManualCounter( '" . POST_VIEWS_COUNTER_URL . "/js/counter.js', pvcExecuteManualCounter );
-					}, false );
+						pvcLoadManualCounter( '" . esc_url( add_query_arg( 'ver', $pvc->defaults['version'], POST_VIEWS_COUNTER_URL . '/js/counter.js' ) ) . "', pvcExecuteManualCounter );
+					};
+
+					if ( document.readyState === 'loading' )
+						document.addEventListener( 'DOMContentLoaded', pvcInitManualCounter, { once: true } );
+					else
+						pvcInitManualCounter();
 				} )( window, document );
 			</script>";
 		}
@@ -153,6 +196,8 @@ class Post_Views_Counter_Counter {
 		// actions
 		add_action( 'wp_ajax_pvc-view-posts', [ $this, 'queue_count' ] );
 		add_action( 'wp_ajax_nopriv_pvc-view-posts', [ $this, 'queue_count' ] );
+		add_action( 'wp_ajax_pvc-queue-runtime', [ $this, 'get_queue_runtime_data' ] );
+		add_action( 'wp_ajax_nopriv_pvc-queue-runtime', [ $this, 'get_queue_runtime_data' ] );
 		add_action( 'wp_print_footer_scripts', [ $this, 'print_queue_count' ], 11 );
 
 		// php counter

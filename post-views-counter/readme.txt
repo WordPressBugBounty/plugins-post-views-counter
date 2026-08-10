@@ -3,8 +3,8 @@ Contributors: dfactory
 Tags: counter, postviews, statistics, analytics, pageviews
 Requires at least: 6.3.0
 Requires PHP: 7.0
-Tested up to: 7.0
-Stable tag: 1.7.13
+Tested up to: 7.0.3
+Stable tag: 1.7.14
 License: MIT License
 License URI: http://opensource.org/licenses/MIT
 
@@ -91,6 +91,11 @@ If you’ve purchased Post Views Counter Pro, your license includes one year of 
 2. screenshot-2.png
 
 == Changelog ==
+
+= 1.7.14 =
+* Fix: Counter loading states and target metadata.
+* Tweak: Pass raw post views shortcode attributes to filters.
+* Tweak: Improve license settings integration and compatibility.
 
 = 1.7.13 =
 * Fix: Save post views correctly from WooCommerce product Quick Edit.
@@ -482,5 +487,5 @@ Initial release
 
 == Upgrade Notice ==
 
-= 1.7.13 =
-Fixes WooCommerce product Quick Edit view saving.
+= 1.7.14 =
+Counter loading state fixes and shortcode filter improvements.

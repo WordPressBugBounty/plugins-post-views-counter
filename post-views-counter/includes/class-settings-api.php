@@ -345,9 +345,9 @@ class Post_Views_Counter_Settings_API {
 			<div class="content-wrapper">
 			<h1 class="screen-reader-text">' . esc_html( $heading ) . '</h1>';
 
-		// skip for internal options page
-		if ( $page_type !== 'settings_page' )
-			settings_errors();
+		// Global admin notices are suppressed until this in-interface location.
+		// Render Settings API feedback for both top-level and Settings-submenu pages.
+		settings_errors();
 
 		// get settings page classes
 		$settings_class = apply_filters( $this->prefix . '_settings_page_class', [ $this->slug . '-settings', $tab_key . '-settings', $this->prefix . '-settings' ] );
@@ -543,6 +543,10 @@ class Post_Views_Counter_Settings_API {
 
 				// prepare field args
 				$args = array_merge( $this->prepare_field_args( $field, $field_id, $field_key, $setting_id, $option_name ), $field );
+				// Raw field definitions override prepared arguments, so normalize the
+				// attributes that are emitted directly into the input afterwards.
+				$args['autocomplete'] = ! empty( $args['autocomplete'] ) && is_string( $args['autocomplete'] ) && in_array( $args['autocomplete'], [ 'off', 'new-password' ], true ) ? $args['autocomplete'] : '';
+				$args['readonly'] = ! empty( $args['readonly'] );
 				$args['setting_id'] = $setting_id;
 				$class = sanitize_html_class( str_replace( '_', '-', $field_id ) );
 				$classes = [ $class ];
@@ -667,6 +671,8 @@ class Post_Views_Counter_Settings_API {
 			'animation'			=> ! empty( $field['animation'] ) ? $field['animation'] : '',
 			'logic'				=> ! empty( $field['logic'] ) ? $field['logic'] : null,
 			'fallback_option'	=> ! empty( $field['fallback_option'] ) ? sanitize_key( $field['fallback_option'] ) : '',
+			'autocomplete'		=> ! empty( $field['autocomplete'] ) && in_array( $field['autocomplete'], [ 'off', 'new-password' ], true ) ? $field['autocomplete'] : '',
+			'readonly'			=> ! empty( $field['readonly'] ),
 			'rows'				=> ! empty( $field['rows'] ) ? (int) $field['rows'] : 6,
 			'cols'				=> ! empty( $field['cols'] ) ? (int) $field['cols'] : 50
 			/*
@@ -921,7 +927,7 @@ class Post_Views_Counter_Settings_API {
 				$empty_disabled = empty( $args['disabled'] );
 
 				$html .= ( ! empty( $args['prepend'] ) ? wp_kses_post( $args['prepend'] ) : '' );
-				$html .= '<input id="' . esc_attr( $args['html_id'] ) . '"' . ( ! empty( $args['subclass'] ) ? ' class="' . esc_attr( $args['subclass'] ) . '"' : '' ) . ' type="text" value="' . esc_attr( $args['value'] ) . '" name="' . esc_attr( $args['name'] ) . '" ' . disabled( $empty_disabled, false, false ) . '/>';
+				$html .= '<input id="' . esc_attr( $args['html_id'] ) . '"' . ( ! empty( $args['subclass'] ) ? ' class="' . esc_attr( $args['subclass'] ) . '"' : '' ) . ' type="text" value="' . esc_attr( $args['value'] ) . '" name="' . esc_attr( $args['name'] ) . '"' . ( ! empty( $args['autocomplete'] ) ? ' autocomplete="' . esc_attr( $args['autocomplete'] ) . '"' : '' ) . ( ! empty( $args['readonly'] ) ? ' readonly="readonly"' : '' ) . ' ' . disabled( $empty_disabled, false, false ) . '/>';
 				$html .= ( ! empty( $args['append'] ) ? wp_kses_post( $args['append'] ) : '' );
 
 				if ( ! $empty_disabled )
@@ -1115,7 +1121,12 @@ class Post_Views_Counter_Settings_API {
 		if ( isset( $_POST['save_' . $setting_name] ) || ( $is_update_request && ! $has_custom_submit_action && ! isset( $_POST['reset_' . $setting_name] ) ) ) {
 			$input = $this->validate_input_settings( $setting_id, $setting_key, $input );
 
-			add_settings_error( $setting_name, 'settings_saved', __( 'Settings saved.', $this->domain ), 'updated' );
+			// Older releases use these stable settings-error keys. Preserve
+			// their notices instead of adding duplicate generic save feedback.
+			$license_notices = function_exists( 'get_settings_errors' ) ? get_settings_errors( 'validate_license' ) : [];
+
+			if ( empty( $license_notices ) )
+				add_settings_error( $setting_name, 'settings_saved', __( 'Settings saved.', $this->domain ), 'updated' );
 		// reset settings
 		} elseif ( isset( $_POST['reset_' . $setting_name] ) ) {
 			// get default values
@@ -1141,7 +1152,11 @@ class Post_Views_Counter_Settings_API {
 				}
 			}
 
-			add_settings_error( $setting_name, 'settings_restored', __( 'Settings restored to defaults.', $this->domain ), 'updated' );
+			// Retain the legacy reset key for new Free with older releases.
+			$license_notices = function_exists( 'get_settings_errors' ) ? get_settings_errors( 'reset_license' ) : [];
+
+			if ( empty( $license_notices ) )
+				add_settings_error( $setting_name, 'settings_restored', __( 'Settings restored to defaults.', $this->domain ), 'updated' );
 		}
 
 		do_action( $this->prefix . '_configuration_updated', 'settings', $input );
