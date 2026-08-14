@@ -15,5 +15,6 @@
 		"reusable": false
 	},
 	"textdomain": "post-views-counter",
-	"editorScript": "file:../index.js"
+	"editorScript": "file:../index.js",
+	"editorStyle": "pvc-block-editor-canvas"
 }

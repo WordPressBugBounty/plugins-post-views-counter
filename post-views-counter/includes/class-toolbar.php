@@ -129,13 +129,23 @@ class Post_Views_Counter_Toolbar {
 				}
 			}
 
-			$graph .= '<span class="pvc-line-graph pvc-line-graph-' . $count_class . '" title="' . sprintf( _n( '%s post view', '%s post views', $count, 'post-views-counter' ), number_format_i18n( $count ) ) . '"></span>';
+			// individual bars are decorative: the container carries the accessible name,
+			// while the title attribute keeps the tooltip for sighted mouse users
+			$graph .= '<span class="pvc-line-graph pvc-line-graph-' . (int) $count_class . '" aria-hidden="true" title="' . esc_attr( sprintf( _n( '%s post view', '%s post views', $count, 'post-views-counter' ), number_format_i18n( $count ) ) ) . '"></span>';
 		}
+
+		// one concise accessible name instead of one label per day
+		$graph_label = sprintf(
+			/* translators: 1: month and year, 2: total number of post views */
+			__( 'Post views chart for %1$s, %2$s total', 'post-views-counter' ),
+			date_i18n( 'F Y', $dt->getTimestamp() ),
+			number_format_i18n( array_sum( $views ) )
+		);
 
 		$admin_bar->add_menu(
 			[
 				'id'	=> 'pvc-post-views',
-				'title'	=> '<span class="pvc-graph-container">' . $graph . '</span>',
+				'title'	=> '<span class="pvc-graph-container" role="img" aria-label="' . esc_attr( $graph_label ) . '">' . $graph . '</span>',
 				'href'	=> false,
 				'meta'	=> [
 					'title' => false

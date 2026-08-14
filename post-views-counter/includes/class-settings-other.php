@@ -80,7 +80,6 @@ class Post_Views_Counter_Settings_Other {
 				'tab'			=> 'other',
 				'title'			=> __( 'Import Strategy', 'post-views-counter' ),
 				'section'		=> 'post_views_counter_other_import',
-				'class'			=> 'pvc-pro-extended',
 				'type'			=> 'custom',
 				'skip_saving'	=> true,
 				'callback'		=> [ $this, 'setting_import_strategy' ]
@@ -209,7 +208,7 @@ class Post_Views_Counter_Settings_Other {
 			$description = isset( $strategy['description'] ) ? $strategy['description'] : '';
 			$is_enabled = $this->pvc->import->is_strategy_enabled( $slug );
 			$input_id = 'pvc-other-import-strategy-' . $slug;
-			$is_pro = ! empty( $strategy['pro_only'] ) && $strategy['pro_only'];
+			$is_pro = ! empty( $strategy['pro_only'] );
 			$pro_unavailable = $is_pro && ! $is_enabled;
 
 			if ( $slug === $import_strategy ) {
@@ -219,6 +218,8 @@ class Post_Views_Counter_Settings_Other {
 			$label_classes = [ 'pvc-import-strategy-option' ];
 			if ( $pro_unavailable ) {
 				$label_classes[] = 'pvc-pro';
+				$label_classes[] = 'pvc-disabled';
+			} elseif ( ! $is_enabled ) {
 				$label_classes[] = 'pvc-disabled';
 			}
 

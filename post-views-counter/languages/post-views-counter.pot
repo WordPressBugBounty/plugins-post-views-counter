@@ -2076,6 +2076,12 @@ msgstr ""
 msgid "%s post view"
 msgstr ""
 
+#. translators: 1: month and year, 2: total number of post views
+#: includes/class-toolbar.php:140
+#, php-format
+msgid "Post views chart for %1$s, %2$s total"
+msgstr ""
+
 #: includes/class-traffic-signals.php:95
 msgid "Traffic Signals"
 msgstr ""

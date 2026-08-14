@@ -2,7 +2,7 @@
 /*
 Plugin Name: Post Views Counter
 Description: Post Views Counter allows you to collect and display how many times a post, page, or other content has been viewed in a simple, fast and reliable way.
-Version: 1.7.14
+Version: 1.7.15
 Author: dFactory
 Author URI: https://dfactory.co/
 Plugin URI: https://postviewscounter.com/
@@ -30,7 +30,7 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 	 * Post Views Counter final class.
 	 *
 	 * @class Post_Views_Counter
-	 * @version	1.7.14
+	 * @version	1.7.15
 	 */
 	final class Post_Views_Counter {
 
@@ -143,7 +143,7 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 				],
 				'schedule_version'		=> 1
 			],
-			'version'	=> '1.7.14'
+			'version'	=> '1.7.15'
 		];
 
 		// instances
@@ -449,6 +449,16 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 
 			// register placeholder blocks when the related blocks are unavailable
 			if ( ! class_exists( 'Post_Views_Counter_Pro' ) ) {
+				/*
+				 * Shared editor canvas stylesheet for every placeholder block.
+				 *
+				 * Registering a single handle here and referencing it as "editorStyle"
+				 * from each placeholder block.json makes WordPress load the stylesheet
+				 * into the iframed editor canvas exactly once, instead of relying on
+				 * "enqueue_block_editor_assets" which only reaches the parent document.
+				 */
+				wp_register_style( 'pvc-block-editor-canvas', POST_VIEWS_COUNTER_URL . '/css/block-editor-canvas.css', [], $this->defaults['version'] );
+
 				$pro_placeholders = [
 					'most-viewed-terms',
 					'most-viewed-users',

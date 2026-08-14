@@ -137,12 +137,14 @@ class Post_Views_Counter_Admin {
 		// get main instance
 		$pvc = Post_Views_Counter();
 
-		// skip widgets and customizer pages
-		if ( $pagenow === 'widgets.php' || $pagenow === 'customize.php' )
+		// skip screens without a single post context: widgets, customizer and the site editor
+		// wp.editor.PluginPostStatusInfo renders in the site editor too, where get_the_ID() is unavailable
+		if ( $pagenow === 'widgets.php' || $pagenow === 'customize.php' || $pagenow === 'site-editor.php' )
 			return;
 
 		// enqueue the bundled block JS file
-		wp_enqueue_script( 'pvc-block-editor', POST_VIEWS_COUNTER_URL . '/js/block-editor.js', [ 'wp-element', 'wp-components', 'wp-edit-post', 'wp-data', 'wp-plugins' ], $pvc->defaults['version'] );
+		// wp-editor: PluginPostStatusInfo, wp-api-request: wp.apiRequest used on save
+		wp_enqueue_script( 'pvc-block-editor', POST_VIEWS_COUNTER_URL . '/js/block-editor.js', [ 'wp-element', 'wp-components', 'wp-editor', 'wp-data', 'wp-plugins', 'wp-api-request' ], $pvc->defaults['version'], false );
 
 		// restrict editing
 		$can_edit = false;

@@ -3,9 +3,9 @@ Contributors: dfactory
 Tags: counter, postviews, statistics, analytics, pageviews
 Requires at least: 6.3.0
 Requires PHP: 7.0
-Tested up to: 7.0.3
-Stable tag: 1.7.14
-License: MIT License
+Tested up to: 7.1
+Stable tag: 1.7.15
+License: MIT
 License URI: http://opensource.org/licenses/MIT
 
 Post Views Counter allows you to collect and display how many times a post, page, or other content has been viewed in a simple, fast and reliable way.
@@ -91,6 +91,13 @@ If you’ve purchased Post Views Counter Pro, your license includes one year of 
 2. screenshot-2.png
 
 == Changelog ==
+
+= 1.7.15 =
+* Fix: Improve Statify import reliability with deterministic batching and collation-safe cursors.
+* Fix: Isolate provider failures and report transaction outcomes accurately.
+* Fix: Preserve import strategy compatibility and correct strategy statistics.
+* Fix: Restore WordPress 7.1 block editor compatibility, including iframed placeholder styles and block cleanup.
+* Tweak: Improve block editor controls and admin toolbar accessibility.
 
 = 1.7.14 =
 * Fix: Counter loading states and target metadata.
@@ -487,5 +494,5 @@ Initial release
 
 == Upgrade Notice ==
 
-= 1.7.14 =
-Counter loading state fixes and shortcode filter improvements.
+= 1.7.15 =
+Improves Statify import reliability and WordPress 7.1 editor compatibility.
