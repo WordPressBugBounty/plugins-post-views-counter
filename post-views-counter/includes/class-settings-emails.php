@@ -617,7 +617,7 @@ class Post_Views_Counter_Settings_Emails {
 	}
 
 	/**
-	 * Determine whether PVC Pro is active.
+	 * Determine whether the extension plugin is active.
 	 *
 	 * @return bool
 	 */

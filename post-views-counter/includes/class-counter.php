@@ -9,13 +9,22 @@ if ( ! defined( 'ABSPATH' ) )
  * @class Post_Views_Counter_Counter
  */
 class Post_Views_Counter_Counter {
+	const REST_MAX_TARGETS = 100;
+	const STORAGE_MAX_PAYLOAD_BYTES = 15920;
+	const STORAGE_MAX_COOKIE_CHUNKS = 4;
+	const STORAGE_MAX_BUCKETS = 8;
+	const STORAGE_MAX_MEMBERS = 1000;
 
 	private $storage = [];
 	private $storage_type = 'cookies';
 	private $queue = [];
 	private $queue_mode = false;
-	private $db_insert_values = '';
+	private $db_insert_values = [];
 	private $cookie = [];
+	private $pending_storage_commit = null;
+	private $pending_session_created = null;
+	private $window_created_candidate = false;
+	private $last_cache_flush_status = 'idle';
 
 	/**
 	 * Class constructor.
@@ -97,7 +106,7 @@ class Post_Views_Counter_Counter {
 		$this->queue_mode = true;
 
 		foreach ( $ids as $id ) {
-			$counted[$id] = ! ( $this->check_post( $id ) === null );
+			$counted[$id] = ! ( $this->check_post( $id, [], true ) === null );
 		}
 
 		// turn off queue mode
@@ -218,10 +227,13 @@ class Post_Views_Counter_Counter {
 	 *
 	 * @param int $post_id
 	 * @param array $content_data
+	 * @param bool $views_only
 	 *
 	 * @return null|int
 	 */
-	public function check_post( $post_id = 0, $content_data = [] ) {
+	public function check_post( $post_id = 0, $content_data = [], $views_only = false ) {
+		$this->reset_pending_count_state();
+
 		// force check cookie in short init mode
 		if ( defined( 'SHORTINIT' ) && SHORTINIT )
 			$this->check_cookie();
@@ -270,6 +282,15 @@ class Post_Views_Counter_Counter {
 				$count_visit = $this->save_cookie_storage( $post_id, $content_data );
 		}
 
+		$visit_increment = 0;
+
+		if ( ! $views_only && $this->window_created_candidate ) {
+			$availability = $pvc->visits instanceof Post_Views_Counter_Visits ? $pvc->visits->get_visits_availability() : [ 'writable' => false ];
+
+			if ( ! empty( $availability['writable'] ) )
+				$visit_increment = 1;
+		}
+
 		// filter visit counting
 		$count_visit = (bool) apply_filters( 'pvc_count_visit', $count_visit, $post_id, $user_id, $user_ip, 'post', $hook_content_data );
 
@@ -278,8 +299,21 @@ class Post_Views_Counter_Counter {
 			// before count visit action
 			do_action( 'pvc_before_count_visit', $post_id, $user_id, $user_ip, 'post', $hook_content_data );
 
-			return $this->count_visit( $post_id );
+			$result = $this->count_visit( $post_id, $visit_increment );
+
+			if ( $result !== null ) {
+				if ( $views_only )
+					$this->discard_pending_storage();
+				else
+					$this->commit_pending_storage();
+
+				return $result;
+			}
 		}
+
+		$this->discard_pending_storage();
+
+		return null;
 	}
 
 	/**
@@ -482,6 +516,8 @@ class Post_Views_Counter_Counter {
 		else
 			$storage_data = [];
 
+		$storage_data = $this->mark_storage_capability( $storage_data, isset( $_POST['storage_capable'] ) ? $_POST['storage_capable'] : null );
+
 		echo wp_json_encode(
 			[
 				'post_id'	=> $post_id,
@@ -557,6 +593,8 @@ class Post_Views_Counter_Counter {
 			$storage_data = $this->sanitize_storage_payload_set( $request->get_param( 'storage_data' ), 'post', 'cookies', $request->get_param( 'storage_data_all' ) );
 		else
 			$storage_data = [];
+
+		$storage_data = $this->mark_storage_capability( $storage_data, $request->get_param( 'storage_capable' ) );
 
 		return [
 			'post_id'	=> $post_id,
@@ -732,8 +770,8 @@ class Post_Views_Counter_Counter {
 	 *
 	 * @return array
 	 */
-	public function build_session_storage_payload( $storage_state, $content_id = 0, $content_type = 'post', $default_expiration = 0, $current_time = 0 ) {
-		$session_state = $this->create_session_storage_state( $storage_state, $content_id, $content_type, $default_expiration, $current_time );
+	public function build_session_storage_payload( $storage_state, $content_id = 0, $content_type = 'post', $default_expiration = 0, $current_time = 0, $emit_hook = true ) {
+		$session_state = $this->create_session_storage_state( $storage_state, $content_id, $content_type, $default_expiration, $current_time, $emit_hook );
 
 		return $this->get_public_session_storage_payload( $session_state );
 	}
@@ -756,6 +794,11 @@ class Post_Views_Counter_Counter {
 			return $merged_state;
 
 		foreach ( $storage_states as $storage_state ) {
+			if ( is_array( $storage_state ) && isset( $storage_state['_pvc_storage_capable'] ) && $storage_state['_pvc_storage_capable'] === false ) {
+				$merged_state['_pvc_storage_capable'] = false;
+				continue;
+			}
+
 			if ( ! $this->is_normalized_storage_state( $storage_state ) || ! $storage_state['is_valid'] )
 				continue;
 
@@ -792,6 +835,14 @@ class Post_Views_Counter_Counter {
 			}
 		}
 
+		if ( count( $merged_state['visited'] ) > self::STORAGE_MAX_BUCKETS ) {
+			$merged_state['format'] = 'invalid';
+			$merged_state['is_valid'] = false;
+			$merged_state['_pvc_storage_capable'] = false;
+
+			return $merged_state;
+		}
+
 		if ( $active_session !== null ) {
 			$merged_state['format'] = 'session';
 			$merged_state['version'] = 1;
@@ -802,7 +853,7 @@ class Post_Views_Counter_Counter {
 			$merged_state['is_expired'] = false;
 			$merged_state['needs_writeback'] = false;
 
-			return $merged_state;
+			return $this->limit_storage_state_members( $merged_state );
 		}
 
 		if ( $has_legacy_entries ) {
@@ -810,7 +861,30 @@ class Post_Views_Counter_Counter {
 			$merged_state['is_valid'] = true;
 		}
 
-		return $merged_state;
+		return $this->limit_storage_state_members( $merged_state );
+	}
+
+	/**
+	 * Keep merged storage membership within the request payload budget.
+	 *
+	 * @param array $storage_state Normalized storage state.
+	 * @return array
+	 */
+	private function limit_storage_state_members( $storage_state ) {
+		$member_count = 0;
+
+		foreach ( $storage_state['visited'] as $bucket => $bucket_members ) {
+			foreach ( array_keys( $bucket_members ) as $content_id ) {
+				$member_count++;
+
+				if ( $member_count <= self::STORAGE_MAX_MEMBERS )
+					continue;
+
+				unset( $storage_state['visited'][$bucket][$content_id], $storage_state['legacy']['expirations'][$bucket][$content_id] );
+			}
+		}
+
+		return $storage_state;
 	}
 
 	/**
@@ -824,7 +898,7 @@ class Post_Views_Counter_Counter {
 	 *
 	 * @return array
 	 */
-	private function create_session_storage_state( $storage_state, $content_id = 0, $content_type = 'post', $default_expiration = 0, $current_time = 0 ) {
+	private function create_session_storage_state( $storage_state, $content_id = 0, $content_type = 'post', $default_expiration = 0, $current_time = 0, $emit_hook = true ) {
 		$content_type = $this->normalize_storage_bucket( $content_type );
 		$content_id = (int) $content_id;
 		$current_time = (int) ( $current_time > 0 ? $current_time : current_time( 'timestamp', true ) );
@@ -847,7 +921,7 @@ class Post_Views_Counter_Counter {
 			$session_state['expires_at'] = $session_expiration;
 
 			// new session created -- entrance/visit hook for the triggering content item
-			if ( $content_id > 0 ) {
+			if ( $content_id > 0 && $emit_hook ) {
 				/**
 				 * Fires when a new anonymous session is created.
 				 *
@@ -868,8 +942,25 @@ class Post_Views_Counter_Counter {
 		$session_state['is_expired'] = ( (int) $session_state['expires_at'] <= $current_time );
 		$session_state['needs_writeback'] = false;
 
-		if ( $content_id > 0 )
+		if ( $content_id > 0 && ! isset( $session_state['visited'][$content_type][$content_id] ) ) {
+			$member_count = 0;
+
+			foreach ( $session_state['visited'] as $bucket_members )
+				$member_count += count( $bucket_members );
+
+			if ( $member_count >= self::STORAGE_MAX_MEMBERS ) {
+				foreach ( $session_state['visited'] as $bucket => $bucket_members ) {
+					if ( empty( $bucket_members ) )
+						continue;
+
+					$remove_id = key( $bucket_members );
+					unset( $session_state['visited'][$bucket][$remove_id] );
+					break;
+				}
+			}
+
 			$session_state['visited'][$content_type][$content_id] = true;
+		}
 
 		return $session_state;
 	}
@@ -919,15 +1010,58 @@ class Post_Views_Counter_Counter {
 	}
 
 	/**
+	 * Emit one browser storage cookie chunk.
+	 *
+	 * Single emission point for every counter cookie so path, domain, secure,
+	 * httponly and SameSite stay identical for writes and deletions. The plugin
+	 * requires PHP 7.4, so the options-array form is always available.
+	 *
+	 * @param string $name Full cookie name including its chunk suffix.
+	 * @param string $value Chunk value; an empty string deletes the chunk.
+	 * @param int    $expires Expiry timestamp; 1 deletes the chunk.
+	 *
+	 * @return bool
+	 */
+	private function set_storage_cookie( $name, $value, $expires ) {
+		return $this->send_cookie(
+			$name,
+			(string) $value,
+			[
+				'expires'	=> (int) $expires,
+				'path'		=> COOKIEPATH,
+				'domain'	=> COOKIE_DOMAIN,
+				'secure'	=> is_ssl(),
+				'httponly'	=> false,
+				'samesite'	=> 'LAX'
+			]
+		);
+	}
+
+	/**
+	 * Transport seam for cookie emission.
+	 *
+	 * Isolated so the prepared attributes can be observed without a real HTTP
+	 * response. Nothing but set_storage_cookie() may call it.
+	 *
+	 * @param string $name Cookie name.
+	 * @param string $value Cookie value.
+	 * @param array  $options PHP 7.4-compatible setcookie() options array.
+	 *
+	 * @return bool
+	 */
+	protected function send_cookie( $name, $value, $options ) {
+		return setcookie( $name, $value, $options );
+	}
+
+	/**
 	 * Clear stale cookie chunks that are no longer used by the current payload.
 	 *
 	 * @param string $cookie_name
 	 * @param int $valid_chunk_count
-	 * @param bool $php_at_least_73
 	 *
 	 * @return void
 	 */
-	private function clear_stale_cookie_chunks( $cookie_name, $valid_chunk_count, $php_at_least_73 ) {
+	private function clear_stale_cookie_chunks( $cookie_name, $valid_chunk_count ) {
 		if ( ! isset( $_COOKIE[$cookie_name] ) || ! is_array( $_COOKIE[$cookie_name] ) )
 			return;
 
@@ -937,22 +1071,7 @@ class Post_Views_Counter_Counter {
 			if ( $chunk_index < $valid_chunk_count )
 				continue;
 
-			if ( $php_at_least_73 ) {
-				setcookie(
-					$cookie_name . '[' . $chunk_index . ']',
-					'',
-					[
-						'expires'	=> 1,
-						'path'		=> COOKIEPATH,
-						'domain'	=> COOKIE_DOMAIN,
-						'secure'	=> is_ssl(),
-						'httponly'	=> false,
-						'samesite'	=> 'LAX'
-					]
-				);
-			} else {
-				setcookie( $cookie_name . '[' . $chunk_index . ']', '', 1, COOKIEPATH, COOKIE_DOMAIN, is_ssl(), false );
-			}
+			$this->set_storage_cookie( $cookie_name . '[' . $chunk_index . ']', '', 1 );
 		}
 	}
 
@@ -1004,6 +1123,13 @@ class Post_Views_Counter_Counter {
 		$content_type = $this->normalize_storage_bucket( $content_type );
 		$storage_payloads = $this->parse_storage_payload_map( $storage_data_all );
 
+		if ( isset( $storage_payloads['_pvc_storage_capable'] ) && $storage_payloads['_pvc_storage_capable'] === false ) {
+			$state = $this->get_empty_storage_state();
+			$state['_pvc_storage_capable'] = false;
+
+			return $state;
+		}
+
 		if ( empty( $storage_payloads ) ) {
 			if ( $storage_type === 'cookies' )
 				return $this->sanitize_cookies_data( $storage_data, $content_type );
@@ -1040,13 +1166,22 @@ class Post_Views_Counter_Counter {
 			if ( $storage_data_all === '' )
 				return [];
 
+			if ( strlen( $storage_data_all ) > self::STORAGE_MAX_PAYLOAD_BYTES )
+				return [ '_pvc_storage_capable' => false ];
+
 			$decoded_payloads = json_decode( stripslashes( $storage_data_all ), true, 8 );
 
 			if ( json_last_error() !== JSON_ERROR_NONE || ! is_array( $decoded_payloads ) )
 				return [];
-		} elseif ( is_array( $storage_data_all ) )
+
+			if ( count( $decoded_payloads ) > self::STORAGE_MAX_BUCKETS )
+				return [ '_pvc_storage_capable' => false ];
+		} elseif ( is_array( $storage_data_all ) ) {
+			if ( count( $storage_data_all ) > self::STORAGE_MAX_BUCKETS )
+				return [ '_pvc_storage_capable' => false ];
+
 			$decoded_payloads = $storage_data_all;
-		else
+		} else
 			return [];
 
 		$storage_payloads = [];
@@ -1060,7 +1195,7 @@ class Post_Views_Counter_Counter {
 	}
 
 	/**
-	 * Check whether the active Pro plugin supports session payload writes.
+	 * Check whether the active extension plugin supports session payload writes.
 	 *
 	 * @return bool
 	 */
@@ -1079,9 +1214,9 @@ class Post_Views_Counter_Counter {
 	/**
 	 * Check whether session payload writes are enabled.
 	 *
-	 * Session payload writes are the default for PVC-only installs. When Pro is active,
-	 * PVC uses Pro's explicit capability declaration and allows this filter to override
-	 * the computed default for controlled testing or emergency rollback.
+	 * Session payload writes are the default for Core-only installs. With an
+	 * active extension, its declared capability determines the default. This
+	 * filter can override it for controlled testing or emergency rollback.
 	 *
 	 * @return bool
 	 */
@@ -1117,6 +1252,21 @@ class Post_Views_Counter_Counter {
 
 		ksort( $bucket_expirations, SORT_NUMERIC );
 
+		while ( count( $bucket_expirations ) > self::STORAGE_MAX_MEMBERS || strlen( $this->serialize_legacy_cookie_payload( $bucket_expirations ) ) > self::STORAGE_MAX_PAYLOAD_BYTES ) {
+			$remove_id = key( $bucket_expirations );
+
+			if ( (int) $remove_id === $content_id ) {
+				next( $bucket_expirations );
+				$remove_id = key( $bucket_expirations );
+			}
+
+			if ( $remove_id === null )
+				break;
+
+			unset( $bucket_expirations[$remove_id] );
+			reset( $bucket_expirations );
+		}
+
 		return $bucket_expirations;
 	}
 
@@ -1150,6 +1300,10 @@ class Post_Views_Counter_Counter {
 			'expiry'	=> []
 		];
 		$cookie_chunks = str_split( $payload, 3980 );
+
+		if ( count( $cookie_chunks ) > self::STORAGE_MAX_COOKIE_CHUNKS )
+			return [ 'name' => [], 'value' => [], 'expiry' => [] ];
+
 		$cookie_expiration = max( $bucket_expirations );
 
 		foreach ( $cookie_chunks as $key => $value ) {
@@ -1296,10 +1450,27 @@ class Post_Views_Counter_Counter {
 	 */
 	private function combine_cookie_chunks( $cookie_chunks ) {
 		$chunks = [];
+		$payload_bytes = 0;
+
+		if ( ! is_array( $cookie_chunks ) || count( $cookie_chunks ) > self::STORAGE_MAX_COOKIE_CHUNKS )
+			return '__pvc_invalid_storage_payload__';
+
+		ksort( $cookie_chunks, SORT_NUMERIC );
+
+		if ( ! empty( $cookie_chunks ) && array_keys( $cookie_chunks ) !== range( 0, count( $cookie_chunks ) - 1 ) )
+			return '__pvc_invalid_storage_payload__';
 
 		foreach ( $cookie_chunks as $chunk ) {
-			if ( is_scalar( $chunk ) )
-				$chunks[] = (string) $chunk;
+			if ( ! is_scalar( $chunk ) )
+				return '__pvc_invalid_storage_payload__';
+
+			$chunk = (string) $chunk;
+			$payload_bytes += strlen( $chunk );
+
+			if ( $payload_bytes > self::STORAGE_MAX_PAYLOAD_BYTES )
+				return '__pvc_invalid_storage_payload__';
+
+			$chunks[] = $chunk;
 		}
 
 		if ( empty( $chunks ) )
@@ -1330,8 +1501,19 @@ class Post_Views_Counter_Counter {
 		$content_type = $this->normalize_storage_bucket( $content_type );
 		$state = $this->get_empty_storage_state();
 
-		if ( is_array( $storage_data ) )
+		if ( is_array( $storage_data ) ) {
+			$encoded_storage = wp_json_encode( $storage_data );
+
+			if ( ! is_string( $encoded_storage ) || strlen( $encoded_storage ) > self::STORAGE_MAX_PAYLOAD_BYTES ) {
+				$state['format'] = 'invalid';
+				$state['is_valid'] = false;
+				$state['_pvc_storage_capable'] = false;
+
+				return $state;
+			}
+
 			return $this->normalize_json_storage_state( $storage_data, $content_type );
+		}
 
 		if ( ! is_scalar( $storage_data ) ) {
 			$state['format'] = 'invalid';
@@ -1341,6 +1523,22 @@ class Post_Views_Counter_Counter {
 		}
 
 		$storage_data = trim( (string) $storage_data );
+
+		if ( $storage_data === '__pvc_invalid_storage_payload__' ) {
+			$state['format'] = 'invalid';
+			$state['is_valid'] = false;
+			$state['_pvc_storage_capable'] = false;
+
+			return $state;
+		}
+
+		if ( strlen( $storage_data ) > self::STORAGE_MAX_PAYLOAD_BYTES ) {
+			$state['format'] = 'invalid';
+			$state['is_valid'] = false;
+			$state['_pvc_storage_capable'] = false;
+
+			return $state;
+		}
 
 		if ( $storage_data === '' )
 			return $state;
@@ -1402,9 +1600,12 @@ class Post_Views_Counter_Counter {
 		$started_at = isset( $storage_data['started_at'] ) ? (int) $storage_data['started_at'] : 0;
 		$expires_at = isset( $storage_data['expires_at'] ) ? (int) $storage_data['expires_at'] : 0;
 
-		if ( $session_id === '' || $started_at <= 0 || $expires_at <= 0 || $expires_at < $started_at || ! isset( $storage_data['visited'] ) || ! is_array( $storage_data['visited'] ) ) {
+		if ( $session_id === '' || $started_at <= 0 || $expires_at <= 0 || $expires_at < $started_at || ! isset( $storage_data['visited'] ) || ! is_array( $storage_data['visited'] ) || count( $storage_data['visited'] ) > self::STORAGE_MAX_BUCKETS ) {
 			$state['format'] = 'invalid';
 			$state['is_valid'] = false;
+
+			if ( isset( $storage_data['visited'] ) && is_array( $storage_data['visited'] ) && count( $storage_data['visited'] ) > self::STORAGE_MAX_BUCKETS )
+				$state['_pvc_storage_capable'] = false;
 
 			return $state;
 		}
@@ -1430,6 +1631,25 @@ class Post_Views_Counter_Counter {
 					$state['legacy']['expirations'][$bucket] = [];
 				}
 			}
+		}
+
+		if ( count( $state['visited'] ) > self::STORAGE_MAX_BUCKETS ) {
+			$state['format'] = 'invalid';
+			$state['is_valid'] = false;
+			$state['_pvc_storage_capable'] = false;
+
+			return $state;
+		}
+
+		$member_count = 0;
+
+		foreach ( $state['visited'] as $bucket_members )
+			$member_count += count( $bucket_members );
+
+		if ( $member_count > self::STORAGE_MAX_MEMBERS ) {
+			$state['format'] = 'invalid';
+			$state['is_valid'] = false;
+			$state['_pvc_storage_capable'] = false;
 		}
 
 		return $state;
@@ -1458,6 +1678,14 @@ class Post_Views_Counter_Counter {
 			$state['visited'][$content_type][$content_id] = true;
 			$state['legacy']['expirations'][$content_type][$content_id] = $expiration;
 			$valid_items++;
+
+			if ( $valid_items > self::STORAGE_MAX_MEMBERS ) {
+				$state['format'] = 'invalid';
+				$state['is_valid'] = false;
+				$state['_pvc_storage_capable'] = false;
+
+				return $state;
+			}
 		}
 
 		if ( $valid_items === 0 ) {
@@ -1494,6 +1722,14 @@ class Post_Views_Counter_Counter {
 
 			$state['visited'][$content_type][$content_id] = true;
 			$state['legacy']['expirations'][$content_type][$content_id] = $expiration;
+
+			if ( count( $state['visited'][$content_type] ) > self::STORAGE_MAX_MEMBERS ) {
+				$state['format'] = 'invalid';
+				$state['is_valid'] = false;
+				$state['_pvc_storage_capable'] = false;
+
+				return $state;
+			}
 		}
 
 		if ( empty( $state['legacy']['expirations'][$content_type] ) ) {
@@ -1574,6 +1810,8 @@ class Post_Views_Counter_Counter {
 		if ( ! is_array( $buckets ) || empty( $buckets ) )
 			return [ 'post' => [] ];
 
+		$buckets = array_slice( $buckets, 0, self::STORAGE_MAX_BUCKETS, true );
+
 		// ensure all bucket values are arrays
 		foreach ( $buckets as $key => $value ) {
 			if ( ! is_array( $value ) )
@@ -1609,6 +1847,12 @@ class Post_Views_Counter_Counter {
 	 * @return bool
 	 */
 	private function save_data_storage( $content, $content_type, $content_data ) {
+		if ( isset( $content_data['_pvc_storage_capable'] ) && $content_data['_pvc_storage_capable'] === false ) {
+			$this->storage = [];
+
+			return true;
+		}
+
 		// get base instance
 		$pvc = Post_Views_Counter();
 
@@ -1623,10 +1867,15 @@ class Post_Views_Counter_Counter {
 			return false;
 		}
 
-		if ( $this->use_session_storage_payload_writes() )
-			$this->storage = $this->build_session_storage_payload( $content_data, $content, $content_type, $expiration, $current_time );
+		if ( $this->use_session_storage_payload_writes() ) {
+			$this->window_created_candidate = $this->storage_state_creates_window( $content_data );
+			$this->storage = $this->build_session_storage_payload( $content_data, $content, $content_type, $expiration, $current_time, false );
+			$this->prepare_session_created_hook( $this->storage, $content, $content_type );
+		}
 		else
 			$this->storage = [ $content_type => $this->build_legacy_storage_payload( $content_data, $content, $content_type, $expiration, $current_time ) ];
+
+		$this->pending_storage_commit = [ 'type' => 'response' ];
 
 		return $count_visit;
 	}
@@ -1640,6 +1889,12 @@ class Post_Views_Counter_Counter {
 	 * @return bool
 	 */
 	private function save_cookie_storage( $content, $content_data ) {
+		if ( isset( $content_data['_pvc_storage_capable'] ) && $content_data['_pvc_storage_capable'] === false ) {
+			$this->storage = [];
+
+			return true;
+		}
+
 		// early return?
 //TODO check this filter in js
 		// if ( apply_filters( 'pvc_maybe_set_cookie', true, $content, $content_type, $content_data ) !== true )
@@ -1664,14 +1919,16 @@ class Post_Views_Counter_Counter {
 
 		if ( ! $this->use_session_storage_payload_writes() ) {
 			$this->storage = $this->build_legacy_cookie_storage_data( $content_data, $cookie_name, $content, 'post', $expiration, $current_time );
+			$this->pending_storage_commit = [ 'type' => 'response' ];
 
 			return $count_visit;
 		}
 
-		$session_payload = $this->build_session_storage_payload( $content_data, $content, 'post', $expiration, $current_time );
+		$this->window_created_candidate = $this->storage_state_creates_window( $content_data );
+		$session_payload = $this->build_session_storage_payload( $content_data, $content, 'post', $expiration, $current_time, false );
 		$session_json = wp_json_encode( $session_payload );
 
-		if ( ! is_string( $session_json ) || $session_json === '' ) {
+		if ( ! is_string( $session_json ) || $session_json === '' || strlen( $session_json ) > self::STORAGE_MAX_PAYLOAD_BYTES ) {
 			$this->storage = [];
 
 			return false;
@@ -1692,6 +1949,8 @@ class Post_Views_Counter_Counter {
 		}
 
 		$this->storage = $cookies_data;
+		$this->pending_storage_commit = [ 'type' => 'response' ];
+		$this->prepare_session_created_hook( $session_payload, $content, 'post' );
 
 		return $count_visit;
 	}
@@ -1722,89 +1981,193 @@ class Post_Views_Counter_Counter {
 
 		// assign cookie name
 		$cookie_name = 'pvc_visits' . ( is_multisite() ? '_' . get_current_blog_id() : '' );
-		$php_at_least_73 = version_compare( phpversion(), '7.3', '>=' );
 
 		if ( ! $this->use_session_storage_payload_writes() ) {
 			$legacy_payload = $this->serialize_legacy_cookie_payload( $this->build_legacy_storage_payload( $cookie, $id, 'post', $expiration, $current_time ) );
 			$cookies_data = $this->build_legacy_cookie_storage_data( $cookie, $cookie_name, $id, 'post', $expiration, $current_time );
-
-			foreach ( $cookies_data['name'] as $key => $cookie_chunk_name ) {
-				if ( $php_at_least_73 ) {
-					setcookie(
-						$cookie_chunk_name,
-						$cookies_data['value'][$key],
-						[
-							'expires'	=> $cookies_data['expiry'][$key],
-							'path'		=> COOKIEPATH,
-							'domain'	=> COOKIE_DOMAIN,
-							'secure'	=> is_ssl(),
-							'httponly'	=> false,
-							'samesite'	=> 'LAX'
-						]
-					);
-				} else {
-					setcookie( $cookie_chunk_name, $cookies_data['value'][$key], $cookies_data['expiry'][$key], COOKIEPATH, COOKIE_DOMAIN, is_ssl(), false );
-				}
-			}
-
-			$this->clear_stale_cookie_chunks( $cookie_name, count( $cookies_data['name'] ), $php_at_least_73 );
-
-			if ( $this->queue_mode )
-				$this->cookie = $this->sanitize_cookies_data( $legacy_payload, 'post' );
+			$this->pending_storage_commit = [
+				'type' => 'cookie',
+				'cookies' => $cookies_data,
+				'cookie_name' => $cookie_name,
+				'normalized_payload' => $legacy_payload
+			];
 
 			return $count_visit;
 		}
 
-		$session_payload = $this->build_session_storage_payload( $cookie, $id, 'post', $expiration, $current_time );
+		$this->window_created_candidate = $this->storage_state_creates_window( $cookie );
+		$session_payload = $this->build_session_storage_payload( $cookie, $id, 'post', $expiration, $current_time, false );
 		$session_json = wp_json_encode( $session_payload );
 
-		if ( ! is_string( $session_json ) || $session_json === '' )
+		if ( ! is_string( $session_json ) || $session_json === '' || strlen( $session_json ) > self::STORAGE_MAX_PAYLOAD_BYTES )
 			return false;
 
-		// check whether php version is at least 7.3
 		$cookie_chunks = str_split( $session_json, 3980 );
 		$cookie_expiration = (int) $session_payload['expires_at'];
 
+		$cookies_data = [ 'name' => [], 'value' => [], 'expiry' => [] ];
+
 		foreach ( $cookie_chunks as $key => $value ) {
-			if ( $php_at_least_73 ) {
-				setcookie(
-					$cookie_name . '[' . $key . ']',
-					$value,
-					[
-						'expires'	=> $cookie_expiration,
-						'path'		=> COOKIEPATH,
-						'domain'	=> COOKIE_DOMAIN,
-						'secure'	=> is_ssl(),
-						'httponly'	=> false,
-						'samesite'	=> 'LAX'
-					]
-				);
-			} else {
-				setcookie( $cookie_name . '[' . $key . ']', $value, $cookie_expiration, COOKIEPATH, COOKIE_DOMAIN, is_ssl(), false );
-			}
+			$cookies_data['name'][] = $cookie_name . '[' . $key . ']';
+			$cookies_data['value'][] = $value;
+			$cookies_data['expiry'][] = $cookie_expiration;
 		}
 
-		$this->clear_stale_cookie_chunks( $cookie_name, count( $cookie_chunks ), $php_at_least_73 );
-
-		if ( $this->queue_mode )
-			$this->cookie = $this->sanitize_cookies_data( $session_json, 'post' );
+		$this->pending_storage_commit = [
+			'type' => 'cookie',
+			'cookies' => $cookies_data,
+			'cookie_name' => $cookie_name,
+			'normalized_payload' => $session_json
+		];
+		$this->prepare_session_created_hook( $session_payload, $id, 'post' );
 
 		return $count_visit;
 	}
 
 	/**
-	 * Count visit.
+	 * Reset temporary decision state at every public count operation boundary.
 	 *
-	 * @param int $post_id
-	 *
-	 * @return int|null
+	 * @return void
 	 */
-	private function count_visit( $post_id ) {
-		// increment amount
-		$increment_amount = (int) apply_filters( 'pvc_views_increment_amount', 1, $post_id, 'post' );
+	private function reset_pending_count_state() {
+		$this->storage = [];
+		$this->pending_storage_commit = null;
+		$this->pending_session_created = null;
+		$this->window_created_candidate = false;
+	}
 
-		if ( $increment_amount < 1 )
-			$increment_amount = 1;
+	/**
+	 * Drop uncommitted browser state after a filtered or failed writer attempt.
+	 *
+	 * @return void
+	 */
+	private function discard_pending_storage() {
+		$this->storage = [];
+		$this->pending_storage_commit = null;
+		$this->pending_session_created = null;
+		$this->window_created_candidate = false;
+	}
+
+	/**
+	 * Commit the prepared browser response/cookie only after writer success.
+	 *
+	 * @return void
+	 */
+	private function commit_pending_storage() {
+		if ( is_array( $this->pending_storage_commit ) && $this->pending_storage_commit['type'] === 'cookie' ) {
+			$this->emit_cookie_storage( $this->pending_storage_commit );
+			$this->cookie = $this->sanitize_cookies_data( $this->pending_storage_commit['normalized_payload'], 'post' );
+		}
+
+		if ( is_array( $this->pending_session_created ) )
+			do_action( 'pvc_session_created', $this->pending_session_created['state'], $this->pending_session_created['content_id'], $this->pending_session_created['content_type'] );
+
+		$this->pending_storage_commit = null;
+		$this->pending_session_created = null;
+		$this->window_created_candidate = false;
+	}
+
+	/**
+	 * Emit prepared cookie chunks.
+	 *
+	 * @param array $commit Prepared cookie commit.
+	 * @return void
+	 */
+	protected function emit_cookie_storage( $commit ) {
+		$cookies_data = $commit['cookies'];
+
+		foreach ( $cookies_data['name'] as $key => $cookie_chunk_name ) {
+			$this->set_storage_cookie( $cookie_chunk_name, $cookies_data['value'][$key], $cookies_data['expiry'][$key] );
+		}
+
+		$this->clear_stale_cookie_chunks( $commit['cookie_name'], count( $cookies_data['name'] ) );
+	}
+
+	/**
+	 * A logical Visit can start only from empty or expired valid normalized
+	 * session storage. Legacy per-content state cannot prove a global start.
+	 *
+	 * @param mixed $storage_state Normalized state.
+	 * @return bool
+	 */
+	private function storage_state_creates_window( $storage_state ) {
+		if ( ! $this->use_session_storage_payload_writes() || ! $this->is_normalized_storage_state( $storage_state ) || empty( $storage_state['is_valid'] ) )
+			return false;
+
+		if ( empty( Post_Views_Counter()->options['general']['time_between_counts']['number'] ) )
+			return false;
+
+		return $storage_state['format'] === 'empty' || ( $storage_state['format'] === 'session' && ! empty( $storage_state['is_expired'] ) );
+	}
+
+	/**
+	 * Attach the browser's explicit storage capability result to normalized
+	 * request state. Older clients omit the flag and retain legacy behavior.
+	 *
+	 * @param array $storage_state Normalized request storage.
+	 * @param mixed $capable Client capability value.
+	 * @return array
+	 */
+	private function mark_storage_capability( $storage_state, $capable ) {
+		$storage_state = is_array( $storage_state ) ? $storage_state : [];
+
+		if ( isset( $storage_state['_pvc_storage_capable'] ) && $storage_state['_pvc_storage_capable'] === false )
+			return $storage_state;
+
+		if ( $capable !== null )
+			$storage_state['_pvc_storage_capable'] = is_bool( $capable ) ? $capable : ! in_array( strtolower( (string) $capable ), [ '0', 'false', 'no' ], true );
+
+		return $storage_state;
+	}
+
+	/**
+	 * Prepare the deferred session-created hook for the triggering tuple.
+	 *
+	 * @param array  $payload Public session payload.
+	 * @param int    $content_id Content ID.
+	 * @param string $content_type Content type.
+	 * @return void
+	 */
+	private function prepare_session_created_hook( $payload, $content_id, $content_type ) {
+		if ( ! $this->window_created_candidate )
+			return;
+
+		$state = $this->normalize_storage_state( $payload, $content_type, 'auto' );
+
+		if ( ! $this->is_normalized_storage_state( $state ) || empty( $state['is_valid'] ) || $state['format'] !== 'session' )
+			return;
+
+		$this->pending_session_created = [
+			'state' => $state,
+			'content_id' => (int) $content_id,
+			'content_type' => $content_type
+		];
+	}
+
+	/**
+	 * Record one countable event for a post.
+	 *
+	 * Terminology used across the counting pipeline:
+	 * - View: an eligible content impression, written to the `count` column.
+	 * - Visit: the first eligible content item that starts a fixed Count
+	 *   Interval, written to the `visits` column. At most one Visit exists per
+	 *   interval, so ancillary tuples in the same request receive Views only.
+	 * - Legacy hook terminology predates the Visit metric and uses "visit" to
+	 *   mean a countable View event. `count_visit()`, `pvc_count_visit`,
+	 *   `pvc_before_count_visit` and `pvc_after_count_visit` all keep that older
+	 *   meaning and are unchanged public contracts.
+	 *
+	 * @param int $post_id Post ID.
+	 * @param int $visit_increment Visit delta for this event; 0 for Views-only.
+	 *
+	 * @return int|null Post ID on success, null when the write did not succeed.
+	 */
+	private function count_visit( $post_id, $visit_increment = 0 ) {
+		// increment amount
+		$view_increment = (int) apply_filters( 'pvc_views_increment_amount', 1, $post_id, 'post' );
+
+		if ( $view_increment < 1 )
+			$view_increment = 1;
 
 		// get day, week, month and year
 		$date = explode( '-', date( 'W-d-m-Y-o', current_time( 'timestamp', Post_Views_Counter()->options['general']['count_time'] === 'gmt' ) ) );
@@ -1813,8 +2176,9 @@ class Post_Views_Counter_Counter {
 		$count_data = [
 			'content_id'	=> $post_id,
 			'content_type'	=> 'post',
-			'increment'		=> $increment_amount,
-			'visits'		=> [
+			'increment'		=> $view_increment,
+			'visit_increment' => (int) $visit_increment,
+			'period_buckets' => [
 				0 => $date[3] . $date[2] . $date[1], // day like 20140324
 				1 => $date[4] . $date[0],			 // week like 201439
 				2 => $date[3] . $date[2],			 // month like 201405
@@ -1822,6 +2186,13 @@ class Post_Views_Counter_Counter {
 				4 => 'total'						 // total views
 			]
 		];
+
+		// Backward compatibility only. Replacements registered on the released
+		// `pvc_count_visit_multi` filter read their period buckets from the
+		// `visits` key, so it must keep carrying the buckets. It is NOT the new
+		// Visit metric; that value travels in `visit_increment`. New consumers
+		// should read `period_buckets`.
+		$count_data['visits'] = $count_data['period_buckets'];
 
 		// attempt to count the visit and check for success
 		if ( call_user_func( apply_filters( 'pvc_count_visit_multi', [ $this, 'count_visit_multi' ] ), $count_data ) ) {
@@ -1835,9 +2206,16 @@ class Post_Views_Counter_Counter {
 	}
 
 	/**
-	 * Prepare values to be inserted into database.
+	 * Public writer for one complete set of period rows.
 	 *
-	 * @param array $data
+	 * Accepts the released payload: `content_id`, `content_type`, `increment`
+	 * (the View delta), `visit_increment` (the Visit delta), `period_buckets`,
+	 * and the legacy `visits` alias that still carries period buckets. This must
+	 * fail closed when it is called independently or through a
+	 * `pvc_count_visit_multi` replacement, so it re-derives Visit availability
+	 * rather than trusting the caller.
+	 *
+	 * @param array $data Count payload.
 	 *
 	 * @return bool
 	 */
@@ -1846,15 +2224,186 @@ class Post_Views_Counter_Counter {
 		if ( empty( $data ) )
 			return false;
 
-		$success = true;
+		$period_buckets = isset( $data['period_buckets'] ) && is_array( $data['period_buckets'] ) ? $data['period_buckets'] : ( isset( $data['visits'] ) && is_array( $data['visits'] ) ? $data['visits'] : [] );
 
-		foreach ( $data['visits'] as $type => $period ) {
-			// hit the database directly and check for failure
-			if ( ! $this->db_insert( $data['content_id'], $type, $period, $data['increment'] ) )
-				$success = false;
+		if ( empty( $period_buckets ) )
+			return false;
+
+		$visits_delta = isset( $data['visit_increment'] ) ? max( 0, (int) $data['visit_increment'] ) : 0;
+		$visits_service = Post_Views_Counter()->visits instanceof Post_Views_Counter_Visits ? Post_Views_Counter()->visits : null;
+		$availability = $visits_service ? $visits_service->get_visits_availability() : [ 'writable' => false, 'write_reason' => 'writer_unsupported' ];
+
+		if ( isset( $availability['write_reason'] ) && $availability['write_reason'] === 'reset_in_progress' )
+			return false;
+
+		$visit_aware = ! empty( $availability['writable'] );
+
+		if ( ! $visit_aware )
+			$visits_delta = 0;
+
+		$rows = [];
+
+		foreach ( $period_buckets as $type => $period ) {
+			if ( (bool) apply_filters( 'pvc_skip_single_query', false, $data['content_id'], $type, $period, $data['increment'], 'post', $visits_delta ) )
+				continue;
+
+			$rows[] = [
+				'id' => (int) $data['content_id'],
+				'type' => (int) $type,
+				'period' => (string) $period,
+				'count' => (int) $data['increment'],
+				'visits' => $visits_delta
+			];
 		}
 
-		return $success;
+		return empty( $rows ) || $this->write_period_rows( $rows, $visit_aware, true );
+	}
+
+	/**
+	 * Declare the complete Core visit-aware writer capability.
+	 *
+	 * @return bool
+	 */
+	public function supports_visit_writes() {
+		return true;
+	}
+
+	/**
+	 * Atomically add one complete set of period rows using prepared values.
+	 * A views-only fallback deliberately omits the visits column so a pending
+	 * or failed migration cannot interrupt existing view counting.
+	 *
+	 * The physical shape of the shared table is re-verified here rather than
+	 * trusted from the caller: `visit_aware` is downgraded when the Visits
+	 * service is absent or its content-column probe is inconclusive, and the
+	 * The extended `content` column is written only when it is known to exist.
+	 *
+	 * @param array $rows Period rows, each with id, type, period, count, visits.
+	 * @param bool  $visit_aware Whether the verified writer may use visits.
+	 *
+	 * @return bool True on success, false when the database write failed.
+	 */
+	private function write_period_rows( $rows, $visit_aware, $use_write_fence = false ) {
+		global $wpdb;
+
+		if ( empty( $rows ) )
+			return true;
+
+		$has_content = false;
+
+		if ( Post_Views_Counter()->visits instanceof Post_Views_Counter_Visits ) {
+			$content_status = Post_Views_Counter()->visits->get_shared_content_column_status();
+
+			if ( $content_status === null )
+				$visit_aware = false;
+			else
+				$has_content = $content_status;
+		} else {
+			$visit_aware = false;
+		}
+
+		$write_fence = $use_write_fence && Post_Views_Counter()->visits instanceof Post_Views_Counter_Visits ? Post_Views_Counter()->visits->get_write_fence_token() : null;
+
+		if ( $use_write_fence && $write_fence === false )
+			return false;
+
+		$columns = [ '`id`', '`type`', '`period`', '`count`' ];
+		$placeholders = [ '%d', '%d', '%s', '%d' ];
+
+		if ( $visit_aware ) {
+			$columns[] = '`visits`';
+			$placeholders[] = '%d';
+		}
+
+		if ( $has_content ) {
+			$columns[] = '`content`';
+			$placeholders[] = '%d';
+		}
+
+		$value_groups = [];
+		$values = [];
+
+		foreach ( $rows as $row ) {
+			$value_groups[] = '(' . implode( ', ', $placeholders ) . ')';
+			$values[] = (int) $row['id'];
+			$values[] = (int) $row['type'];
+			$values[] = (string) $row['period'];
+			$values[] = (int) $row['count'];
+
+			if ( $visit_aware )
+				$values[] = max( 0, (int) $row['visits'] );
+
+			if ( $has_content )
+				$values[] = 0;
+		}
+
+		$target_table = '`' . $wpdb->prefix . 'post_views`';
+		$updates = [ '`count` = ' . $target_table . '.`count` + VALUES(`count`)' ];
+
+		if ( $visit_aware )
+			$updates[] = '`visits` = ' . $target_table . '.`visits` + VALUES(`visits`)';
+
+		$base_values = $values;
+		$generation = is_array( $write_fence ) && isset( $write_fence['generation'] ) ? (int) $write_fence['generation'] : null;
+		$attempts = $write_fence === null ? 1 : 3;
+		$result = false;
+
+		for ( $attempt = 0; $attempt < $attempts; $attempt++ ) {
+			$values = $base_values;
+
+			if ( is_array( $write_fence ) ) {
+				$selects = [];
+
+				foreach ( $rows as $row_index => $row ) {
+					$aliases = $row_index === 0 ? ' AS `id`, %d AS `type`, %s AS `period`, %d AS `count`' : ', %d, %s, %d';
+					$select = 'SELECT %d' . $aliases;
+					$column_count = 4;
+
+					if ( $visit_aware ) {
+						$select .= $row_index === 0 ? ', %d AS `visits`' : ', %d';
+						$column_count++;
+					}
+
+					if ( $has_content ) {
+						$select .= $row_index === 0 ? ', %d AS `content`' : ', %d';
+						$column_count++;
+					}
+
+					$selects[] = $select;
+				}
+
+				$predicate = ! empty( $write_fence['exists'] ) ? "EXISTS (SELECT 1 FROM `{$wpdb->options}` WHERE `option_name` = %s AND BINARY `option_value` = BINARY %s)" : "NOT EXISTS (SELECT 1 FROM `{$wpdb->options}` WHERE `option_name` = %s)";
+				$values[] = Post_Views_Counter_Visits::OPTION_NAME;
+
+				if ( ! empty( $write_fence['exists'] ) )
+					$values[] = $write_fence['raw'];
+
+				$sql = 'INSERT INTO ' . $target_table . ' (' . implode( ', ', $columns ) . ') SELECT * FROM (' . implode( ' UNION ALL ', $selects ) . ') AS `pvc_rows` WHERE ' . $predicate . ' ON DUPLICATE KEY UPDATE ' . implode( ', ', $updates );
+			} else
+				$sql = 'INSERT INTO ' . $target_table . ' (' . implode( ', ', $columns ) . ') VALUES ' . implode( ', ', $value_groups ) . ' ON DUPLICATE KEY UPDATE ' . implode( ', ', $updates );
+
+			$result = $wpdb->query( $wpdb->prepare( $sql, $values ) );
+
+			if ( $result !== 0 || ! is_array( $write_fence ) )
+				break;
+
+			$next_fence = Post_Views_Counter()->visits->get_write_fence_token( true );
+
+			if ( $next_fence === false || (int) $next_fence['generation'] !== $generation )
+				return false;
+
+			$write_fence = $next_fence;
+		}
+
+		if ( $result === false || $result === 0 ) {
+			error_log( 'Post Views Counter: shared counter write failed.' );
+			return false;
+		}
+
+		if ( class_exists( 'Post_Views_Counter_Visits_Query' ) )
+			Post_Views_Counter_Visits_Query::invalidate_read_cache();
+
+		return true;
 	}
 
 	/**
@@ -1876,7 +2425,10 @@ class Post_Views_Counter_Counter {
 
 		$data = apply_filters( 'pvc_delete_post_views_where_clause', $data, $post_id );
 
-		$wpdb->delete( $wpdb->prefix . 'post_views', $data['where'], $data['format'] );
+		$deleted = $wpdb->delete( $wpdb->prefix . 'post_views', $data['where'], $data['format'] );
+
+		if ( $deleted > 0 && class_exists( 'Post_Views_Counter_Visits_Query' ) )
+			Post_Views_Counter_Visits_Query::invalidate_read_cache();
 	}
 
 	/**
@@ -1935,124 +2487,619 @@ class Post_Views_Counter_Counter {
 	 * @return bool
 	 */
 	public function flush_cache_to_db() {
-		// get keys
-		$key_names = wp_cache_get( 'cached_key_names', 'pvc' );
+		// The extended writer owns the four-part shared-row queue and its Visit
+		// companion. Keep existing base update/email preflight callers compatible by delegating
+		// through the active writer rather than parsing extended keys as base keys.
+		if ( function_exists( 'Post_Views_Counter_Pro' ) ) {
+			$pro = Post_Views_Counter_Pro();
 
-		if ( ! $key_names )
-			$key_names = [];
-		else {
-			// create an array out of a string that's stored in the cache
-			$key_names = explode( '|', $key_names );
-		}
-
-		// any data?
-		if ( ! empty( $key_names ) ) {
-			foreach ( $key_names as $key_name ) {
-				// get values stored within the key name itself
-				list( $id, $type, $period ) = explode( '.', $key_name );
-
-				// get the cached count value
-				$count = wp_cache_get( $key_name, 'pvc' );
-
-				// store cached value in the database
-				$this->db_prepare_insert( $id, $type, $period, $count );
-
-				// clear the cache key we just flushed
-				wp_cache_delete( $key_name, 'pvc' );
+			if ( is_object( $pro ) && isset( $pro->counter ) && is_object( $pro->counter ) && $pro->counter !== $this && method_exists( $pro->counter, 'flush_cache_to_db' ) ) {
+				$result = $pro->counter->flush_cache_to_db( 'pvc' );
+				$this->last_cache_flush_status = method_exists( $pro->counter, 'get_cache_flush_status' ) ? $pro->counter->get_cache_flush_status() : ( $result ? 'completed' : 'failed' );
+				return $result;
 			}
-
-			// flush values to database
-			$this->db_commit_insert();
-
-			// delete the key holding the list
-			wp_cache_delete( 'cached_key_names', 'pvc' );
 		}
 
-		// remove last flush
-		wp_cache_delete( 'last-flush', 'pvc' );
+		$lock_token = $this->acquire_core_flush_lock();
 
-		return true;
+		if ( $lock_token === false ) {
+			$this->last_cache_flush_status = 'busy';
+			return false;
+		}
+
+		try {
+			$result = $this->flush_core_cache_owner( $lock_token );
+			$this->last_cache_flush_status = $result ? 'completed' : ( $this->core_flush_lock_owned( $lock_token ) ? 'failed' : 'ownership_lost' );
+			return $result;
+		} finally {
+			$this->release_core_flush_lock( $lock_token );
+		}
 	}
 
 	/**
-	 * Insert or update views count.
+	 * Return the outcome of this request's most recent cache flush attempt.
 	 *
-	 * @global object $wpdb
+	 * @return string idle|busy|pending|failed|ownership_lost|completed
+	 */
+	public function get_cache_flush_status() {
+		return $this->last_cache_flush_status;
+	}
+
+	/**
+	 * Drain the legacy Core queue while the caller owns the drain lock.
 	 *
-	 * @param int $id
-	 * @param int $type
-	 * @param string $period
-	 * @param int $count
+	 * Database commit precedes cache acknowledgement. A crash can replay a
+	 * committed snapshot, but it cannot silently discard acknowledged work.
 	 *
 	 * @return bool
 	 */
-	private function db_insert( $id, $type, $period, $count ) {
+	private function flush_core_cache_owner( $lock_token ) {
 		global $wpdb;
 
-		// skip single query?
-		if ( (bool) apply_filters( 'pvc_skip_single_query', false, $id, $type, $period, $count, 'post' ) )
-			return true; // consider skipped as "successful" for this context
+		$key_names = wp_cache_get( 'cached_key_names', 'pvc' );
+		$key_names = is_string( $key_names ) ? array_filter( explode( '|', $key_names ), 'strlen' ) : (array) $key_names;
+		$key_names = array_values( array_unique( array_filter( $key_names, 'strlen' ) ) );
 
-		$result = $wpdb->query( $wpdb->prepare( 'INSERT INTO ' . $wpdb->prefix . 'post_views (`id`, `type`, `period`, `count`) VALUES (%d, %d, %s, %d) ON DUPLICATE KEY UPDATE count = count + %d', $id, $type, $period, $count, $count ) );
-
-		// check for query failure
-		if ( $result === false ) {
-			// log the error for debugging
-			error_log( sprintf( 'Post Views Counter: Failed to insert/update views for ID %d, type %d, period %s. MySQL error: %s', $id, $type, $period, $wpdb->last_error ) );
-			return false;
+		if ( empty( $key_names ) ) {
+			wp_cache_delete( 'last-flush', 'pvc' );
+			return true;
 		}
+
+		$batch_size = max( 1, absint( apply_filters( 'pvc_core_flush_batch_rows', 100 ) ) );
+
+		foreach ( array_chunk( $key_names, $batch_size ) as $key_batch ) {
+			$lock_ttl = $this->get_core_flush_lock_ttl();
+
+			if ( ! $this->refresh_core_flush_lock( $lock_token, $lock_ttl ) )
+				return false;
+
+			$snapshots = [];
+			$this->db_insert_values = [];
+
+			foreach ( $key_batch as $key_name ) {
+				$key = $this->parse_core_queue_key( $key_name );
+
+				if ( $key === null )
+					continue;
+
+				$count = (int) wp_cache_get( $key_name, 'pvc' );
+
+				if ( $count <= 0 )
+					continue;
+
+				$snapshots[ $key_name ] = $count;
+
+				// Legacy three-part Core queue entries (id.type.period) carry a
+				// View delta only; they have no Visit companion and predate the
+				// Visits metric entirely. A Visit cannot be reconstructed from
+				// them, so passing visit_increment = 0 here and committing with
+				// visit_aware = false below is intentional: it preserves the
+				// queued Views without inventing Visit data.
+				if ( ! $this->db_prepare_insert( $key['id'], $key['type'], $key['period'], $count, 0, 'post' ) ) {
+					$this->db_insert_values = [];
+					return false;
+				}
+			}
+
+			// Renew immediately before acquiring the reset fence. The snapshot is
+			// legacy generation 0 work, so only a generation read ordered by this
+			// fence may authorize its database commit.
+			if ( ! $this->refresh_core_flush_lock( $lock_token, $lock_ttl ) ) {
+				$this->db_insert_values = [];
+				return false;
+			}
+
+			// Build every helper-dependent part of the Views-only upsert before the
+			// measurement fence. Cache backends and extension callbacks are not safe
+			// while MySQL permits this connection to use only two locked tables.
+			$commit_sql = $this->prepare_core_legacy_insert_sql();
+
+			if ( $commit_sql === false ) {
+				$this->db_insert_values = [];
+				return false;
+			}
+
+			$fenced_renewal = $this->prepare_core_fenced_lock_renewal( $lock_token, $lock_ttl );
+
+			if ( $fenced_renewal === false ) {
+				$this->db_insert_values = [];
+				return false;
+			}
+
+			$fenced_generation_read = $this->prepare_core_fenced_generation_read();
+
+			$visits = Post_Views_Counter()->visits;
+
+			if ( ! $visits instanceof Post_Views_Counter_Visits || ! $visits->begin_measurement_fence() ) {
+				$this->db_insert_values = [];
+				return false;
+			}
+
+			$generation = false;
+			$committed = false;
+			$fence_result = [ 'unlocked' => false, 'flushed' => false ];
+
+			try {
+				// This fenced region permits only the prebuilt options UPDATE, an
+				// uncached options SELECT, and the prebuilt post_views upsert. Do not
+				// call WordPress/cache helpers here: extension callbacks may query an
+				// unrelated table while LOCK TABLES is active.
+				if ( ! $this->renew_core_flush_lock_fenced( $fenced_renewal ) ) {
+					$this->db_insert_values = [];
+					return false;
+				}
+
+				$generation = $this->get_core_queue_generation_fenced( $fenced_generation_read );
+
+				// A missing, malformed, or otherwise unusable durable state cannot
+				// prove this legacy snapshot belongs before a reset. Fail closed and
+				// leave the snapshot recoverable for a later retry.
+				if ( $generation === false ) {
+					$this->db_insert_values = [];
+					return false;
+				}
+
+				if ( $generation === 0 ) {
+					if ( $commit_sql !== '' ) {
+						$result = $wpdb->query( $commit_sql );
+
+						if ( $result === false || $result === 0 )
+							return false;
+
+						$this->db_insert_values = [];
+						$committed = true;
+					}
+				} else
+					// Any supported Core scalar was published before the first reset.
+					// Retire it without callbacks or writes; retaining its cache entry
+					// makes a later retry prove the same generation before doing anything.
+					$this->db_insert_values = [];
+			} finally {
+				$fence_result = $visits->end_measurement_fence();
+			}
+
+			// No cache acknowledgement or derived-cache retirement is valid until
+			// the restrictive SQL fence has been confirmed released and its FIFO
+			// publication work has completed.
+			if ( empty( $fence_result['unlocked'] ) || empty( $fence_result['flushed'] ) )
+				return false;
+
+			// The legacy commit changes the Views numerator used by the Visit-derived
+			// cache, so retire that cache only after the table fence is released.
+			if ( $committed && class_exists( 'Post_Views_Counter_Visits_Query' ) )
+				Post_Views_Counter_Visits_Query::invalidate_read_cache();
+
+			// The acknowledgement is outside the table fence, but must still prove
+			// that this flusher owns the exact snapshot before changing cache state.
+			if ( ! $this->refresh_core_flush_lock( $lock_token, $lock_ttl ) )
+				return false;
+
+			$completed = [];
+
+			foreach ( $snapshots as $key_name => $count ) {
+				$remainder = wp_cache_decr( $key_name, $count, 'pvc' );
+
+				if ( $remainder === false )
+					return false;
+
+				if ( (int) $remainder === 0 )
+					$completed[] = $key_name;
+			}
+
+			if ( ! $this->cleanup_core_queue_membership( $completed ) )
+				return false;
+		}
+
+		if ( wp_cache_delete( 'last-flush', 'pvc' ) === false && wp_cache_get( 'last-flush', 'pvc' ) !== false )
+			return false;
 
 		return true;
 	}
 
 	/**
-	 * Prepare bulk insert or update views count.
+	 * Build the legacy Views-only upsert before acquiring the measurement fence.
 	 *
-	 * @param int $id
-	 * @param int $type
-	 * @param string $period
-	 * @param int $count
-	 *
-	 * @return void
+	 * @return string|false Prepared SQL, an empty string, or false on an unsafe shape.
 	 */
-	private function db_prepare_insert( $id, $type, $period, $count = 1 ) {
-		// cast count
-		$count = (int) $count;
-
-		if ( ! $count )
-			$count = 1;
-
-		// any queries?
-		if ( ! empty( $this->db_insert_values ) )
-			$this->db_insert_values .= ', ';
-
-		// append insert queries
-		$this->db_insert_values .= sprintf( '(%d, %d, "%s", %d)', $id, $type, $period, $count );
-
-		if ( strlen( $this->db_insert_values ) > 25000 )
-			$this->db_commit_insert();
-	}
-
-	/**
-	 * Insert accumulated values to database.
-	 *
-	 * @global object $wpdb
-	 *
-	 * @return int|bool
-	 */
-	private function db_commit_insert() {
+	private function prepare_core_legacy_insert_sql() {
 		global $wpdb;
 
 		if ( empty( $this->db_insert_values ) )
+			return '';
+
+		$has_content = false;
+		$visits = Post_Views_Counter()->visits;
+
+		if ( $visits instanceof Post_Views_Counter_Visits )
+			$has_content = $visits->get_shared_content_column_status() === true;
+
+		$columns = [ '`id`', '`type`', '`period`', '`count`' ];
+		$placeholders = [ '%d', '%d', '%s', '%d' ];
+
+		if ( $has_content ) {
+			$columns[] = '`content`';
+			$placeholders[] = '%d';
+		}
+
+		$value_groups = [];
+		$values = [];
+
+		foreach ( $this->db_insert_values as $row ) {
+			$value_groups[] = '(' . implode( ', ', $placeholders ) . ')';
+			$values[] = (int) $row['id'];
+			$values[] = (int) $row['type'];
+			$values[] = (string) $row['period'];
+			$values[] = (int) $row['count'];
+
+			if ( $has_content )
+				$values[] = 0;
+		}
+
+		$table = '`' . $wpdb->prefix . 'post_views`';
+		$sql = 'INSERT INTO ' . $table . ' (' . implode( ', ', $columns ) . ') VALUES ' . implode( ', ', $value_groups ) . ' ON DUPLICATE KEY UPDATE `count` = ' . $table . '.`count` + VALUES(`count`)';
+
+		return $wpdb->prepare( $sql, $values );
+	}
+
+	/**
+	 * Capture an owner-checked lease replacement before the measurement fence.
+	 *
+	 * @param string $token Lock token.
+	 * @param int    $ttl Lease duration in seconds.
+	 * @return string|false Prebuilt constrained options UPDATE or false.
+	 */
+	private function prepare_core_fenced_lock_renewal( $token, $ttl ) {
+		global $wpdb;
+
+		$name = 'post_views_counter_core_flush_lock';
+		$raw = $wpdb->get_var( $wpdb->prepare( "SELECT `option_value` FROM `{$wpdb->options}` WHERE `option_name` = %s", $name ) );
+		$current = $raw === null ? false : maybe_unserialize( $raw );
+
+		if ( ! is_array( $current ) || empty( $current['token'] ) || ! hash_equals( (string) $current['token'], (string) $token ) )
 			return false;
 
-		$result = $wpdb->query(
-			"INSERT INTO " . $wpdb->prefix . "post_views (id, type, period, count)
-			VALUES " . $this->db_insert_values . "
-			ON DUPLICATE KEY UPDATE count = count + VALUES(count)"
-		);
+		$replacement = [
+			'token' => $token,
+			'expires_at' => max( time() + $ttl, (int) $current['expires_at'] + 1 )
+		];
 
-		$this->db_insert_values = '';
+		return $wpdb->prepare( "UPDATE `{$wpdb->options}` SET `option_value` = %s WHERE `option_name` = %s AND BINARY `option_value` = BINARY %s", maybe_serialize( $replacement ), $name, $raw );
+	}
+
+	/**
+	 * Renew the Core lease while the measurement fence permits only options SQL.
+	 *
+	 * @param string $sql Prebuilt constrained UPDATE statement.
+	 * @return bool
+	 */
+	private function renew_core_flush_lock_fenced( $sql ) {
+		global $wpdb;
+
+		return $wpdb->query( $sql ) === 1;
+	}
+
+	/**
+	 * Build the durable queue-generation SELECT before the measurement fence.
+	 *
+	 * @return string
+	 */
+	private function prepare_core_fenced_generation_read() {
+		global $wpdb;
+
+		return $wpdb->prepare( "SELECT `option_value` FROM `{$wpdb->options}` WHERE `option_name` = %s", Post_Views_Counter_Visits::OPTION_NAME );
+	}
+
+	/**
+	 * Read the durable queue generation while the measurement fence is held.
+	 *
+	 * Missing state is the released generation-0 format. Existing state must be
+	 * the exact current durable shape required by get_queue_generation().
+	 *
+	 * @param string $sql Prebuilt constrained options SELECT.
+	 * @return int|false
+	 */
+	private function get_core_queue_generation_fenced( $sql ) {
+		global $wpdb;
+
+		$wpdb->last_error = '';
+		$raw = $wpdb->get_var( $sql );
+
+		if ( $wpdb->last_error !== '' )
+			return false;
+
+		if ( $raw === null )
+			return 0;
+
+		// Never instantiate serialized objects under the table fence. A poisoned
+		// __wakeup()/autoload callback could issue SQL for a table MySQL has not
+		// locked, so only a non-instantiating exact array decode is permitted here.
+		if ( ! is_string( $raw ) || $raw === '' || substr( $raw, 0, 2 ) !== 'a:' || substr( $raw, -1 ) !== '}' )
+			return false;
+
+		set_error_handler( [ $this, 'suppress_core_fenced_decode_diagnostic' ] );
+
+		try {
+			$state = unserialize( $raw, [ 'allowed_classes' => false ] );
+		} finally {
+			restore_error_handler();
+		}
+
+		$visits = Post_Views_Counter()->visits;
+
+		if ( ! $visits instanceof Post_Views_Counter_Visits || ! $visits->is_current_normal_state_raw( $state ) || serialize( $state ) !== $raw )
+			return false;
+
+		return $state['queue_generation'];
+	}
+
+	/**
+	 * Contain unserialize diagnostics within the restricted fence without calling
+	 * a third-party error handler that could issue arbitrary SQL.
+	 *
+	 * @return bool
+	 */
+	private function suppress_core_fenced_decode_diagnostic() {
+		return true;
+	}
+
+	/**
+	 * Parse one legacy base queue key without accepting the four-part extended
+	 * shape.
+	 *
+	 * @param mixed $key_name Cache key.
+	 * @return array|null
+	 */
+	private function parse_core_queue_key( $key_name ) {
+		$raw_key_name = (string) $key_name;
+		$key_name = sanitize_text_field( $raw_key_name );
+
+		if ( $key_name !== $raw_key_name )
+			return null;
+
+		$parts = explode( '.', $key_name );
+
+		if ( count( $parts ) !== 3 )
+			return null;
+
+		if ( ! ctype_digit( $parts[0] ) || ! ctype_digit( $parts[1] ) )
+			return null;
+
+		$id = (int) $parts[0];
+		$type = (int) $parts[1];
+		$period = sanitize_key( $parts[2] );
+
+		if ( $period !== $parts[2] || $id < 1 || $type < 0 || $type > 4 || $period === '' )
+			return null;
+
+		if ( ! $this->is_valid_core_queue_period( (int) $type, $period ) )
+			return null;
+
+		return [ 'id' => $id, 'type' => (int) $type, 'period' => $period ];
+	}
+
+	/**
+	 * Validate the calendar identity encoded by a Core queue period.
+	 *
+	 * @param int    $type Storage type.
+	 * @param string $period Storage period.
+	 * @return bool
+	 */
+	private function is_valid_core_queue_period( $type, $period ) {
+		if ( $type === 4 )
+			return $period === 'total';
+
+		if ( $type === 0 && preg_match( '/^\d{8}$/', $period ) )
+			return checkdate( (int) substr( $period, 4, 2 ), (int) substr( $period, 6, 2 ), (int) substr( $period, 0, 4 ) );
+
+		if ( $type === 1 && preg_match( '/^(\d{4})(\d{2})$/', $period, $matches ) ) {
+			$year = (int) $matches[1];
+			$week = (int) $matches[2];
+
+			if ( $week < 1 || $week > 53 )
+				return false;
+
+			$date = ( new DateTimeImmutable( 'now', new DateTimeZone( 'UTC' ) ) )->setISODate( $year, $week, 1 );
+			return $date->format( 'oW' ) === $period;
+		}
+
+		if ( $type === 2 && preg_match( '/^(\d{4})(\d{2})$/', $period, $matches ) )
+			return (int) $matches[1] > 0 && (int) $matches[2] >= 1 && (int) $matches[2] <= 12;
+
+		return $type === 3 && preg_match( '/^\d{4}$/', $period ) && (int) $period > 0;
+	}
+
+	/**
+	 * Remove completed Core scalars and only their membership entries.
+	 *
+	 * @param array $completed Completed keys.
+	 * @return bool
+	 */
+	private function cleanup_core_queue_membership( $completed ) {
+		if ( empty( $completed ) )
+			return true;
+
+		$live = wp_cache_get( 'cached_key_names', 'pvc' );
+		$live = is_string( $live ) ? array_filter( explode( '|', $live ), 'strlen' ) : (array) $live;
+		$remaining = [];
+
+		foreach ( $live as $key_name ) {
+			if ( in_array( $key_name, $completed, true ) && (int) wp_cache_get( $key_name, 'pvc' ) === 0 ) {
+				if ( ! wp_cache_delete( $key_name, 'pvc' ) && wp_cache_get( $key_name, 'pvc' ) !== false )
+					return false;
+
+				continue;
+			}
+
+			$remaining[] = $key_name;
+		}
+
+		$remaining = array_values( array_unique( array_filter( $remaining, 'strlen' ) ) );
+
+		if ( empty( $remaining ) )
+			return wp_cache_delete( 'cached_key_names', 'pvc' ) || wp_cache_get( 'cached_key_names', 'pvc' ) === false;
+
+		return (bool) wp_cache_set( 'cached_key_names', implode( '|', $remaining ), 'pvc' );
+	}
+
+	/**
+	 * Acquire the Core drain lock with token-conditioned stale takeover.
+	 *
+	 * @return string|false
+	 */
+	private function acquire_core_flush_lock() {
+		$name = 'post_views_counter_core_flush_lock';
+		$token = wp_generate_uuid4();
+		$lock = [ 'token' => $token, 'expires_at' => time() + max( 30, absint( apply_filters( 'pvc_core_flush_lock_ttl', 300 ) ) ) ];
+
+		if ( add_option( $name, $lock, '', false ) )
+			return $token;
+
+		$current = get_option( $name, [] );
+
+		if ( is_array( $current ) && ! empty( $current['expires_at'] ) && (int) $current['expires_at'] > time() )
+			return false;
+
+		return $this->replace_core_lock_if_unchanged( $name, $current, $lock ) ? $token : false;
+	}
+
+	/**
+	 * Refresh the Core drain lease only while the token still owns it.
+	 *
+	 * @param string   $token Lock token.
+	 * @param int|null $ttl Optional pre-evaluated lease duration.
+	 * @return bool
+	 */
+	private function refresh_core_flush_lock( $token, $ttl = null ) {
+		$name = 'post_views_counter_core_flush_lock';
+		$current = get_option( $name, [] );
+
+		if ( ! is_array( $current ) || empty( $current['token'] ) || ! hash_equals( (string) $current['token'], (string) $token ) )
+			return false;
+
+		$replacement = [
+			'token' => $token,
+			'expires_at' => max(
+				time() + ( $ttl === null ? $this->get_core_flush_lock_ttl() : $ttl ),
+				(int) $current['expires_at'] + 1
+			)
+		];
+
+		return $this->replace_core_lock_if_unchanged( $name, $current, $replacement );
+	}
+
+	/**
+	 * Resolve the Core drain lease duration before entering a table fence.
+	 *
+	 * @return int
+	 */
+	private function get_core_flush_lock_ttl() {
+		return max( 30, absint( apply_filters( 'pvc_core_flush_lock_ttl', 300 ) ) );
+	}
+
+	/**
+	 * Check current Core drain ownership.
+	 *
+	 * @param string $token Lock token.
+	 * @return bool
+	 */
+	private function core_flush_lock_owned( $token ) {
+		$current = get_option( 'post_views_counter_core_flush_lock', [] );
+
+		return is_array( $current ) && ! empty( $current['token'] ) && hash_equals( (string) $current['token'], (string) $token );
+	}
+
+	/**
+	 * Release the Core drain lock only while still its owner.
+	 *
+	 * @param string $token Owner token.
+	 * @return void
+	 */
+	private function release_core_flush_lock( $token ) {
+		global $wpdb;
+
+		$name = 'post_views_counter_core_flush_lock';
+		$current = get_option( $name, [] );
+
+		if ( ! is_array( $current ) || empty( $current['token'] ) || ! hash_equals( (string) $current['token'], (string) $token ) )
+			return;
+
+		$result = $wpdb->query( $wpdb->prepare( "DELETE FROM `{$wpdb->options}` WHERE `option_name` = %s AND `option_value` = %s", $name, maybe_serialize( $current ) ) );
+
+		if ( $result === 1 )
+			wp_cache_delete( $name, 'options' );
+	}
+
+	/**
+	 * Replace an expired Core drain lock without delete-then-add takeover.
+	 *
+	 * @param string $name Option name.
+	 * @param mixed  $expected Expected lock.
+	 * @param array  $replacement Replacement lock.
+	 * @return bool
+	 */
+	private function replace_core_lock_if_unchanged( $name, $expected, $replacement ) {
+		global $wpdb;
+
+		$result = $wpdb->query( $wpdb->prepare( "UPDATE `{$wpdb->options}` SET `option_value` = %s WHERE `option_name` = %s AND `option_value` = %s", maybe_serialize( $replacement ), $name, maybe_serialize( $expected ) ) );
+
+		if ( $result === 1 )
+			wp_cache_delete( $name, 'options' );
+
+		return $result === 1;
+	}
+
+	/**
+	 * Buffer one period row for the next multi-row commit.
+	 *
+	 * Rows are accumulated in `$db_insert_values` and written by
+	 * `db_commit_insert()`. A skipped row is reported as success because the
+	 * caller asked for it to be omitted, not because a write failed.
+	 *
+	 * @param int    $id Content ID.
+	 * @param int    $type Period type (0-4).
+	 * @param string $period Period bucket value.
+	 * @param int    $count View increment for this row.
+	 * @param int    $visit_increment Visit increment for this row; 0 for Views-only.
+	 * @param string $content_type Content type passed to `pvc_skip_single_query`.
+	 *
+	 * @return bool True when the row was buffered or deliberately skipped.
+	 */
+	private function db_prepare_insert( $id, $type, $period, $count = 1, $visit_increment = 0, $content_type = 'post' ) {
+		$count = (int) $count;
+		$visit_increment = max( 0, (int) $visit_increment );
+
+		if ( (bool) apply_filters( 'pvc_skip_single_query', false, $id, $type, $period, $count, $content_type, $visit_increment ) )
+			return true;
+
+		$this->db_insert_values[] = [
+			'id' => (int) $id,
+			'type' => (int) $type,
+			'period' => (string) $period,
+			'count' => $count,
+			'visits' => $visit_increment
+		];
+
+		return true;
+	}
+
+	/**
+	 * Write every buffered period row in one prepared multi-row upsert.
+	 *
+	 * @param bool $visit_aware Whether the verified writer may use the `visits`
+	 *                          column. Callers that cannot reconstruct Visits
+	 *                          must pass false so the column is left untouched.
+	 *
+	 * @return bool True on success, false when there was nothing buffered or the
+	 *              write failed. The buffer is only cleared on success.
+	 */
+	private function db_commit_insert( $visit_aware = false ) {
+		if ( empty( $this->db_insert_values ) )
+			return false;
+
+		$result = $this->write_period_rows( $this->db_insert_values, $visit_aware );
+
+		if ( $result !== false )
+			$this->db_insert_values = [];
 
 		return $result;
 	}
@@ -2354,6 +3401,9 @@ class Post_Views_Counter_Counter {
 					],
 					'storage_data_all' => [
 						'default'			 => ''
+					],
+					'storage_capable' => [
+						'sanitize_callback' => 'rest_sanitize_boolean'
 					]
 				] )
 			]
@@ -2369,9 +3419,11 @@ class Post_Views_Counter_Counter {
 				'permission_callback'	 => [ $this, 'get_post_views_permissions_check' ],
 				'args'					 => apply_filters( 'pvc_rest_api_get_post_views_args', [
 					'id' => [
-						'default'			=> 0,
-						'sanitize_callback'	=> [ $this, 'validate_rest_api_data' ]
-					]
+						'default'			=> 0
+					],
+					'metric' => [],
+					'period' => [ 'default' => 'total' ],
+					'type' => [ 'default' => 'post' ]
 				] )
 			]
 		);
@@ -2385,7 +3437,170 @@ class Post_Views_Counter_Counter {
 	 * @return int
 	 */
 	public function get_post_views_rest_api( $request ) {
-		return pvc_get_post_views( $request->get_param( 'id' ) );
+		$raw_metric = $request->get_param( 'metric' );
+		$raw_id = $request->get_param( 'id' );
+
+		if ( ! is_scalar( $raw_id ) || ! preg_match( '/^[1-9]\d*(,[1-9]\d*)*$/', (string) $raw_id ) )
+			return new WP_Error( 'pvc_invalid_metric', __( 'The requested PVC metric is not supported.', 'post-views-counter' ), [ 'status' => 400 ] );
+
+		$ids = array_values( array_filter( array_unique( array_map( 'absint', explode( ',', (string) $raw_id ) ) ) ) );
+
+		// Preserve the exact legacy scalar response when named metric mode is absent.
+		if ( $raw_metric === null )
+			return pvc_get_post_views( $ids );
+
+		if ( ! is_scalar( $raw_metric ) )
+			return new WP_Error( 'pvc_invalid_metric', __( 'The requested PVC metric is not supported.', 'post-views-counter' ), [ 'status' => 400 ] );
+
+		$metric = (string) $raw_metric;
+
+		if ( count( $ids ) > self::REST_MAX_TARGETS )
+			return new WP_Error( 'pvc_too_many_targets', __( 'Too many PVC metric targets were requested.', 'post-views-counter' ), [ 'status' => 400 ] );
+		$raw_period = $request->get_param( 'period' );
+		$period = is_scalar( $raw_period ) ? (string) $raw_period : '';
+		$raw_type = $request->get_param( 'type' );
+		$type = is_scalar( $raw_type ) ? (string) $raw_type : '';
+
+		// Visits Cleanup Addendum -- 2026-09-26 (O2): the named read is Views-only
+		if ( $metric !== 'views' || $type !== 'post' || ! preg_match( '/^[a-z0-9_-]+$/', $period ) )
+			return new WP_Error( 'pvc_invalid_metric', __( 'The requested PVC metric is not supported.', 'post-views-counter' ), [ 'status' => 400 ] );
+
+		$normalized = function_exists( 'pvc_normalize_views_period' ) ? pvc_normalize_views_period( $period ) : null;
+
+		if ( $normalized === null )
+			$availability = [ 'readable' => false, 'read_reason' => 'invalid_period' ];
+		else {
+			$content_status = isset( Post_Views_Counter()->visits ) ? Post_Views_Counter()->visits->get_shared_content_column_status() : false;
+			$availability = $content_status === null ? [ 'readable' => false, 'read_reason' => 'schema_probe_failed' ] : [ 'readable' => true, 'read_reason' => 'ready' ];
+		}
+
+		$raw_values = [];
+
+		if ( ! empty( $availability['readable'] ) )
+			$raw_values = $this->get_named_post_view_values( $ids, $period, $normalized );
+
+		$values = [];
+		$formatted = [];
+		$display_options = Post_Views_Counter()->options['display'];
+
+		foreach ( $ids as $id ) {
+			$key = 'post:' . $id . ':' . $period;
+			$value = empty( $availability['readable'] ) ? null : ( isset( $raw_values[$id] ) ? $raw_values[$id] : 0 );
+			$values[$key] = $value;
+
+			// An unreadable View is not a stored zero, so it never reaches numeric
+			// formatting; it renders the unavailable dash instead.
+			$display_value = $value === null ? '&mdash;' : ( ! empty( $display_options['use_format'] ) ? number_format_i18n( $value ) : (string) $value );
+			$filtered_value = apply_filters( 'pvc_post_views_number_format', $display_value, $id );
+
+			$filtered_value = is_scalar( $filtered_value ) ? (string) $filtered_value : $display_value;
+			$formatted[$key] = html_entity_decode( wp_strip_all_tags( $filtered_value ), ENT_QUOTES, 'UTF-8' );
+		}
+
+		// Anonymous dynamic payloads expose only the stable raw-read result. They
+		// never expose schema internals or other internal state metadata.
+		$public_availability = [
+			'readable' => ! empty( $availability['readable'] ),
+			'reason' => isset( $availability['read_reason'] ) ? sanitize_key( $availability['read_reason'] ) : 'unavailable'
+		];
+
+		return [
+			'metric' => $metric,
+			'type' => $type,
+			'period' => $period,
+			'values' => $values,
+			'formatted' => $formatted,
+			'availability' => $public_availability
+		];
+	}
+
+	/**
+	 * Read named post Views in one grouped query while preserving value filters.
+	 *
+	 * @param int[]  $ids Post IDs.
+	 * @param string $period Requested period.
+	 * @param array  $normalized Canonical period.
+	 * @return int[] Values keyed by post ID.
+	 */
+	private function get_named_post_view_values( $ids, $period, $normalized ) {
+		if ( $this->has_custom_post_views_period_filter() ) {
+			$values = [];
+
+			foreach ( $ids as $id )
+				$values[$id] = pvc_get_post_views( $id, $period );
+
+			return $values;
+		}
+
+		global $wpdb;
+		$params = $ids;
+		$where = [ 'id IN (' . implode( ', ', array_fill( 0, count( $ids ), '%d' ) ) . ')', 'type = %d' ];
+		$params[] = (int) $normalized['type'];
+
+		if ( (int) $normalized['type'] === 4 ) {
+			$where[] = 'period = %s';
+			$params[] = 'total';
+		} elseif ( $normalized['period_from'] === $normalized['period_to'] ) {
+			$where[] = 'CAST(period AS SIGNED) = %d';
+			$params[] = (int) $normalized['period_from'];
+		} else {
+			$where[] = 'CAST(period AS SIGNED) BETWEEN %d AND %d';
+			$params[] = (int) $normalized['period_from'];
+			$params[] = (int) $normalized['period_to'];
+		}
+
+		$content_status = isset( Post_Views_Counter()->visits ) ? Post_Views_Counter()->visits->get_shared_content_column_status() : false;
+
+		if ( $content_status === null )
+			return [];
+
+		if ( $content_status )
+			$where[] = 'content = 0';
+
+		$sql = $wpdb->prepare( 'SELECT id, SUM(count) AS views FROM `' . $wpdb->prefix . 'post_views` WHERE ' . implode( ' AND ', $where ) . ' GROUP BY id', $params );
+		$cache_key = md5( $sql );
+		$rows = wp_cache_get( $cache_key, 'pvc-get_post_views' );
+
+		if ( $rows === false ) {
+			$rows = $wpdb->get_results( $sql, ARRAY_A );
+			$rows = is_array( $rows ) ? $rows : [];
+			wp_cache_add( $cache_key, $rows, 'pvc-get_post_views', absint( apply_filters( 'pvc_object_cache_expire', 300 ) ) );
+		}
+
+		$values = array_fill_keys( $ids, 0 );
+
+		foreach ( $rows as $row ) {
+			$id = isset( $row['id'] ) ? absint( $row['id'] ) : 0;
+
+			if ( array_key_exists( $id, $values ) )
+				$values[$id] = isset( $row['views'] ) ? (int) $row['views'] : 0;
+		}
+
+		foreach ( $values as $id => $value )
+			$values[$id] = (int) apply_filters( 'pvc_get_post_views', $value, $id, $period, [] );
+
+		return $values;
+	}
+
+	/**
+	 * Check for period filters beyond the canonical post discriminator.
+	 *
+	 * @return bool
+	 */
+	private function has_custom_post_views_period_filter() {
+		global $wp_filter;
+
+		if ( empty( $wp_filter['pvc_get_post_views_period_where'] ) || ! isset( $wp_filter['pvc_get_post_views_period_where']->callbacks ) )
+			return false;
+
+		foreach ( $wp_filter['pvc_get_post_views_period_where']->callbacks as $callbacks ) {
+			foreach ( $callbacks as $callback ) {
+				if ( ! isset( $callback['function'] ) || $callback['function'] !== 'pvc_get_post_views_period_where' )
+					return true;
+			}
+		}
+
+		return false;
 	}
 
 	/**

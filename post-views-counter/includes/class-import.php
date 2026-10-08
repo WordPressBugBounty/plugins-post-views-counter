@@ -294,7 +294,7 @@ class Post_Views_Counter_Import {
 		}
 
 		// Preserve the pre-1.7.15 contract for filtered definitions that expose
-		// only the legacy Pro badge/availability flag.
+		// only the legacy premium badge/availability flag.
 		if ( ! empty( $definition['pro_only'] ) ) {
 			return class_exists( 'Post_Views_Counter_Pro' );
 		}
@@ -1680,7 +1680,7 @@ class Post_Views_Counter_Import {
 	 *
 	 * Rejects malformed values, zero dates, year zero and impossible calendar
 	 * dates. This strict policy applies to Page Views Count source rows and to
-	 * the reported source date range; Statify row handling is unchanged (D8-8).
+	 * the reported source date range; Statify row handling is unchanged.
 	 *
 	 * @param mixed $value Source date.
 	 * @return bool

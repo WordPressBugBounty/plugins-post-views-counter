@@ -98,7 +98,8 @@ class Post_Views_Counter_Update {
 			if ( $general['flush_interval']['number'] > 0 ) {
 				if ( $pvc->counter->using_object_cache( true ) ) {
 					// flush data from cache
-					$pvc->counter->flush_cache_to_db();
+					if ( ! $pvc->counter->flush_cache_to_db() )
+						return;
 				}
 
 				// unschedule cron event
@@ -183,6 +184,34 @@ class Post_Views_Counter_Update {
 			}
 
 			$pvc->options['general']['time_between_counts'] = $normalized_time_between_counts;
+		}
+
+		// update 1.7.16+ - unify frontend counter labels
+		if ( version_compare( $current_db_version, '1.7.16', '<' ) ) {
+			$display = get_option( 'post_views_counter_settings_display', [] );
+
+			if ( ! is_array( $display ) )
+				$display = [];
+
+			// rewrite ONLY the exact legacy defaults; every customised value is preserved
+			$legacy_labels = [
+				'label'			=> [ 'Post Views:', 'Views:' ]
+			];
+			$labels_changed = false;
+
+			foreach ( $legacy_labels as $key => $pair ) {
+				list( $legacy, $unified ) = $pair;
+
+				if ( ! isset( $display[$key] ) || ! is_string( $display[$key] ) || $display[$key] !== $legacy )
+					continue;
+
+				$display[$key] = $unified;
+				$pvc->options['display'][$key] = $unified;
+				$labels_changed = true;
+			}
+
+			if ( $labels_changed )
+				update_option( 'post_views_counter_settings_display', $display );
 		}
 
 		// move menu position setting to display tab

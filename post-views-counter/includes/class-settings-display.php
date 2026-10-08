@@ -67,18 +67,56 @@ class Post_Views_Counter_Settings_Display {
 	public function get_fields() {
 		// get post types
 		$post_types = $this->pvc->functions->get_post_types();
+		$frontend_template = isset( $this->pvc->options['display']['frontend_template'] ) && is_scalar( $this->pvc->options['display']['frontend_template'] ) ? (string) $this->pvc->options['display']['frontend_template'] : $this->pvc->defaults['display']['frontend_template'];
+		$frontend_template = wp_kses_post( $frontend_template );
+		$template_notice = empty( Post_Views_Counter_Frontend::get_template_text_metrics( $frontend_template ) ) ? ' <span class="pvc-frontend-template-empty-notice">' . esc_html__( 'This custom format currently displays no counter.', 'post-views-counter' ) . '</span>' : '';
 
 		// user groups
+		// Rendering order only. Guests first, then the two mutually exclusive
+		// logged-in audiences. The stored keys are unchanged.
 		$groups = [
-			'users'		=> __( 'logged in users', 'post-views-counter' ),
-			'guests'	=> __( 'guests', 'post-views-counter' ),
-			'roles'		=> __( 'selected user roles', 'post-views-counter' )
+			'guests'	=> __( 'Guests', 'post-views-counter' ),
+			'users'		=> __( 'All logged-in users', 'post-views-counter' ),
+			'roles'		=> __( 'Selected user roles', 'post-views-counter' )
 		];
 
 		// get user roles
 		$user_roles = $this->pvc->functions->get_user_roles();
 
 		return [
+			'frontend_counter_metrics' => [
+				'tab'			=> 'display',
+				'title'			=> __( 'Display Format', 'post-views-counter' ),
+				'section'		=> 'post_views_counter_display_appearance',
+				'type'			=> 'select',
+				'html_id'		=> 'pvc-frontend-counter-metrics',
+				/* translators: %s: [post-views] shortcode */
+				'description'	=> sprintf( __( 'Choose the format of the counter inserted automatically on the frontend. A manually placed %s shortcode keeps the Views format.', 'post-views-counter' ), '<code>[post-views]</code>' ),
+				'validate'		=> [ $this, 'validate_frontend_counter_metrics' ],
+					'options'		=> [
+						'views'		=> __( 'Views', 'post-views-counter' ),
+						'custom'	=> __( 'Custom format', 'post-views-counter' )
+					]
+				],
+				'frontend_template' => [
+					'tab'			=> 'display',
+					'title'			=> __( 'Custom Format', 'post-views-counter' ),
+					'section'		=> 'post_views_counter_display_appearance',
+					'type'			=> 'input',
+					'html_id'		=> 'pvc-frontend-template',
+					'before_field'	=> '<label class="screen-reader-text" for="pvc-frontend-template">' . esc_html__( 'Custom Format', 'post-views-counter' ) . '</label>',
+					/* translators: 1: views token, 2: icon token */
+					'description'	=> sprintf( __( 'Build the counter with %1$s (the view count) and %2$s (the counter icon). Safe HTML is allowed. A format without %1$s displays nothing.', 'post-views-counter' ), '<code>%%views%%</code>', '<code>%%icon%%</code>' ) . $template_notice,
+					'subclass'		=> 'regular-text',
+					'validate'		=> [ $this, 'validate_frontend_template' ],
+					'reset'			=> [ $this, 'reset_frontend_template' ],
+					'logic'			=> [
+						'field'		=> 'pvc-frontend-counter-metrics',
+						'operator'	=> 'is',
+						'value'		=> 'custom'
+					],
+					'animation'		=> 'slide'
+				],
 			'label' => [
 				'tab'			=> 'display',
 				'title'			=> __( 'Views Label', 'post-views-counter' ),
@@ -88,7 +126,15 @@ class Post_Views_Counter_Settings_Display {
 				'description'	=> __( 'Text shown next to the view count.', 'post-views-counter' ),
 				'subclass'		=> 'regular-text',
 				'validate'		=> [ $this, 'validate_label' ],
-				'reset'			=> [ $this, 'reset_label' ]
+				'reset'			=> [ $this, 'reset_label' ],
+					'logic'			=> [
+						[
+							'field'		=> 'pvc-frontend-counter-metrics',
+							'operator'	=> 'isnot',
+							'value'		=> 'custom'
+						]
+					],
+				'animation'		=> 'slide'
 			],
 			'display_period' => [
 				'tab'			=> 'display',
@@ -116,7 +162,15 @@ class Post_Views_Counter_Settings_Display {
 				'options'		=> [
 					'icon'	=> __( 'Icon', 'post-views-counter' ),
 					'text'	=> __( 'Label', 'post-views-counter' )
-				]
+				],
+				// a custom format places the icon itself with %%icon%%, so the
+				// preset's icon and label choices do not apply to it
+				'logic'			=> [
+					'field'		=> 'pvc-frontend-counter-metrics',
+					'operator'	=> 'isnot',
+					'value'		=> 'custom'
+				],
+				'animation'		=> 'slide'
 			],
 			'icon_class' => [
 				'tab'			=> 'display',
@@ -132,7 +186,15 @@ class Post_Views_Counter_Settings_Display {
 					'value'		=> 'icon'
 				],
 				'animation'		=> 'slide',
-				'description'	=> sprintf( __( 'Enter the CSS class for the views icon. Any Dashicons class is supported.', 'post-views-counter' ), 'https://developer.wordpress.org/resource/dashicons/' ),
+				// Retired: the counter icon is painted by a CSS mask and no longer uses
+				// an icon font. The stored value is kept untouched for a possible later
+				// use, but takes no part in rendering; 'pvc_counter_icon_class' is the
+				// supported way to supply a custom icon. skip_saving is what carries the
+				// stored value through a save of this tab, since an unrendered field
+				// submits nothing and would otherwise be reset to the default.
+				'skip_rendering'	=> true,
+				'skip_saving'	=> true,
+				'description'	=> __( 'Retired. The counter icon no longer uses the Dashicons font. Use the pvc_counter_icon_class filter to supply a custom icon class.', 'post-views-counter' ),
 				'subclass'		=> 'regular-text'
 			],
 			'position' => [
@@ -162,7 +224,7 @@ class Post_Views_Counter_Settings_Display {
 				'section'		=> 'post_views_counter_display_admin',
 				'type'			=> 'boolean',
 				'description'	=> '',
-				'label'			=> __( 'Allow editing the view count on the post edit screen.', 'post-views-counter' )
+				'label'			=> __( 'Allow manual editing of the Views total.', 'post-views-counter' )
 			],
 			'dynamic_loading' => [
 				'tab'			=> 'display',
@@ -254,18 +316,31 @@ class Post_Views_Counter_Settings_Display {
 				'title' => __( 'User Type', 'post-views-counter' ),
 				'section' => 'post_views_counter_display_visibility',
 				'type' => 'checkbox',
-				'description' => __( 'Hide the view counter for selected visitor groups.', 'post-views-counter' ),
+				'description' => __( 'Hide the automatically inserted counter from the selected visitor groups. Note: selecting both "Guests" and "All logged-in users" hides the automatic counter from everyone.', 'post-views-counter' ),
 				'options' => $groups,
 				'name' => 'post_views_counter_settings_display[restrict_display][groups]',
 				'value' => $this->pvc->options['display']['restrict_display']['groups'],
 				'validate' => [ $this, 'validate_restrict_display_groups' ],
+				// "Selected user roles" is unreachable while every logged-in user is
+				// already hidden, so the option is cleared and disabled in that state.
+				'logic' => [
+					[
+						'field' => 'restrict_display_groups',
+						'operator' => 'containsnot',
+						'value' => 'users',
+						'scope' => 'option',
+						'action' => 'enable',
+						'target' => '#pvc-display-restrict-display-groups-roles',
+						'clear_on_disable' => true
+					]
+				],
 			],
 			'restrict_display_roles' => [
 				'tab' => 'display',
 				'title' => __( 'User Roles', 'post-views-counter' ),
 				'section' => 'post_views_counter_display_visibility',
 				'type' => 'checkbox',
-				'description' => __( 'Hide the view counter for selected user roles.', 'post-views-counter' ),
+				'description' => __( 'Hide the automatically inserted counter from the selected user roles.', 'post-views-counter' ),
 				'options' => $user_roles,
 				'name' => 'post_views_counter_settings_display[restrict_display][roles]',
 				'value' => $this->pvc->options['display']['restrict_display']['roles'],
@@ -324,6 +399,56 @@ class Post_Views_Counter_Settings_Display {
 	public function reset_label( $default, $field ) {
 		if ( function_exists( 'icl_register_string' ) )
 			icl_register_string( 'Post Views Counter', 'Post Views Label', $default );
+
+		return $default;
+	}
+
+	/**
+	 * Validate the metric selected for automatic frontend injection.
+	 *
+	 * @param mixed $input Submitted value.
+	 * @param array $field Field definition.
+	 * @return string
+	 */
+	public function validate_frontend_counter_metrics( $input, $field ) {
+		$input = is_scalar( $input ) ? sanitize_key( (string) $input ) : '';
+
+		return in_array( $input, [ 'views', 'custom' ], true ) ? $input : 'views';
+	}
+
+	/**
+	 * Validate and register the custom frontend template.
+	 *
+	 * @param mixed $input Submitted value.
+	 * @param array $field Field definition.
+	 * @return string
+	 */
+	public function validate_frontend_template( $input, $field ) {
+		if ( is_scalar( $input ) )
+			$template = wp_kses_post( (string) $input );
+		else {
+			$current = isset( $this->pvc->options['display']['frontend_template'] ) ? $this->pvc->options['display']['frontend_template'] : null;
+			$template = is_scalar( $current ) ? wp_kses_post( (string) $current ) : $this->pvc->defaults['display']['frontend_template'];
+		}
+
+		if ( function_exists( 'icl_register_string' ) )
+			icl_register_string( 'Post Views Counter', 'Frontend Template', $template );
+
+		return $template;
+	}
+
+	/**
+	 * Restore and register the default custom frontend template.
+	 *
+	 * @param string $default Default value.
+	 * @param array $field Field definition.
+	 * @return string
+	 */
+	public function reset_frontend_template( $default, $field ) {
+		$default = wp_kses_post( (string) $default );
+
+		if ( function_exists( 'icl_register_string' ) )
+			icl_register_string( 'Post Views Counter', 'Frontend Template', $default );
 
 		return $default;
 	}
@@ -406,7 +531,16 @@ class Post_Views_Counter_Settings_Display {
 			}
 		}
 
-		return array_unique( $groups );
+		$groups = array_unique( $groups );
+
+		// "All logged-in users" and "Selected user roles" are alternatives: the role
+		// branch is unreachable while every logged-in user is already hidden. Drop
+		// the unreachable marker so a no-JavaScript submission cannot store a
+		// contradictory state. The separately stored role list is never touched.
+		if ( in_array( 'users', $groups, true ) )
+			$groups = array_diff( $groups, [ 'roles' ] );
+
+		return array_values( $groups );
 	}
 
 	public function validate_restrict_display_roles( $input, $field ) {

@@ -50,6 +50,20 @@ class Post_Views_Counter_Query {
 	 * @return void
 	 */
 	public function extend_pre_query( $query ) {
+		$this->join_sql = '';
+		$query->pvc_orderby = false;
+		$query->pvc_query = false;
+		$query->total_views = 0;
+
+		$orderby = isset( $query->query_vars['orderby'] ) ? $query->query_vars['orderby'] : '';
+		$has_orderby = function( $metric ) use ( $orderby ) {
+			if ( is_array( $orderby ) )
+				return array_key_exists( $metric, $orderby );
+
+			return is_string( $orderby ) && preg_match( '/(?:^|\s)' . preg_quote( $metric, '/' ) . '(?:\s|$)/', $orderby ) === 1;
+		};
+		$query->pvc_orderby = $has_orderby( 'post_views' );
+
 		// skip empty sort order
 		if ( empty( $query->query_vars['orderby'] ) )
 			return;
@@ -252,14 +266,15 @@ class Post_Views_Counter_Query {
 		}
 
 		// is it sorted by post views?
-		if ( ( $sql === '' && isset( $query->pvc_orderby ) && $query->pvc_orderby ) || apply_filters( 'pvc_extend_post_object', false, $query ) === true )
+		if ( ( $sql === '' && ! empty( $query->pvc_orderby ) ) || apply_filters( 'pvc_extend_post_object', false, $query ) === true )
 			$sql = ' AND pvc.type = 4';
 
 		// add date range
 		if ( $sql !== '' ) {
 			global $wpdb;
 
-			$join .= " LEFT JOIN " . $wpdb->prefix . "post_views pvc ON pvc.id = " . $wpdb->prefix . "posts.ID" . $sql;
+			$content_sql = pvc_post_views_has_content_column() ? ' AND pvc.content = 0' : '';
+			$join .= " LEFT JOIN " . $wpdb->prefix . "post_views pvc ON pvc.id = " . $wpdb->prefix . "posts.ID" . $content_sql . $sql;
 
 			$this->join_sql = $join;
 		}
@@ -279,7 +294,7 @@ class Post_Views_Counter_Query {
 	 */
 	public function posts_groupby( $groupby, $query ) {
 		// is it sorted by post views or views_query is used?
-		if ( ( isset( $query->pvc_orderby ) && $query->pvc_orderby ) || ( isset( $query->pvc_query ) && $query->pvc_query ) || apply_filters( 'pvc_extend_post_object', false, $query ) === true ) {
+		if ( ! empty( $query->pvc_orderby ) || ! empty( $query->pvc_query ) || apply_filters( 'pvc_extend_post_object', false, $query ) === true ) {
 			global $pagenow;
 
 			// needed only for sorting
@@ -333,8 +348,10 @@ class Post_Views_Counter_Query {
 				$query->pvc_groupby = true;
 
 			// hide empty?
-			if ( ! isset( $query->query['views_query']['hide_empty'] ) || $query->query['views_query']['hide_empty'] === true )
-				$groupby .= ' HAVING post_views > 0';
+			$views_query = isset( $query->query['views_query'] ) ? $query->query['views_query'] : [];
+
+			if ( ! isset( $views_query['hide_empty'] ) || $views_query['hide_empty'] === true )
+				$groupby .= ' HAVING SUM( COALESCE( pvc.count, 0 ) ) > 0';
 		}
 
 		return $groupby;
@@ -348,31 +365,180 @@ class Post_Views_Counter_Query {
 	 * @return string
 	 */
 	public function posts_orderby( $orderby, $query ) {
-		// is it sorted by post views?
-		if ( ( isset( $query->pvc_orderby ) && $query->pvc_orderby ) ) {
-			// get order
-			$order = strtoupper( (string) $query->get( 'order' ) );
-			$org_orderby = $query->get( 'orderby' );
+		global $wpdb;
 
-			if ( ! in_array( $order, [ 'ASC', 'DESC' ], true ) )
-				$order = 'DESC';
+		if ( empty( $query->pvc_orderby ) )
+			return $orderby;
 
-			if ( is_array( $org_orderby ) && array_key_exists( 'post_views', $org_orderby ) ) {
-				$post_views_order = strtoupper( (string) $org_orderby['post_views'] );
+		$requested = $query->get( 'orderby' );
+		$default_order = strtoupper( (string) $query->get( 'order' ) );
 
-				if ( in_array( $post_views_order, [ 'ASC', 'DESC' ], true ) )
-					$order = $post_views_order;
-			}
+		if ( ! in_array( $default_order, [ 'ASC', 'DESC' ], true ) )
+			$default_order = 'DESC';
 
-			$post_views_orderby = 'post_views ' . $order;
+		$tokens = $this->get_metric_orderby_tokens( $requested, $default_order );
+		$nonmetric = $this->split_top_level_orderby( $orderby );
+		$translated = [];
 
-			if ( ! is_string( $orderby ) || trim( $orderby ) === '' )
-				$orderby = $post_views_orderby;
-			elseif ( preg_match( '/\bpost_views\b/i', $orderby ) !== 1 )
-				$orderby = $post_views_orderby . ', ' . $orderby;
+		foreach ( $tokens as $token ) {
+			if ( $token['metric'] === 'post_views' && ! empty( $query->pvc_orderby ) )
+				$translated[] = 'SUM( COALESCE( pvc.count, 0 ) ) ' . $token['order'] . ( isset( $query->pvc_admin_column_sort ) && $query->pvc_admin_column_sort === 'views' ? ', ' . $wpdb->posts . '.ID ASC' : '' );
+			elseif ( $this->did_wordpress_orderby_token_emit_clause( $token['metric'], $query ) && ! empty( $nonmetric ) )
+				$translated[] = array_shift( $nonmetric );
 		}
 
-		return $orderby;
+		return implode( ', ', array_merge( $translated, $nonmetric ) );
+	}
+
+	/**
+	 * Split rendered ORDER BY SQL at commas outside function calls and quoted
+	 * strings. WordPress uses FIELD( ... ) for the inclusion-order tokens.
+	 *
+	 * @param mixed $orderby Rendered ORDER BY SQL.
+	 * @return array
+	 */
+	private function split_top_level_orderby( $orderby ) {
+		if ( ! is_string( $orderby ) || trim( $orderby ) === '' )
+			return [];
+
+		$clauses = [];
+		$start = 0;
+		$depth = 0;
+		$quote = '';
+		$length = strlen( $orderby );
+
+		for ( $index = 0; $index < $length; $index++ ) {
+			$character = $orderby[$index];
+
+			if ( $quote !== '' ) {
+				if ( $character === $quote && ( $index === 0 || $orderby[$index - 1] !== '\\' ) )
+					$quote = '';
+				continue;
+			}
+
+			if ( $character === "'" || $character === '"' || $character === '`' )
+				$quote = $character;
+			elseif ( $character === '(' )
+				$depth++;
+			elseif ( $character === ')' && $depth > 0 )
+				$depth--;
+			elseif ( $character === ',' && $depth === 0 ) {
+				$clause = trim( substr( $orderby, $start, $index - $start ) );
+				if ( $clause !== '' )
+					$clauses[] = $clause;
+				$start = $index + 1;
+			}
+		}
+
+		$clause = trim( substr( $orderby, $start ) );
+		if ( $clause !== '' )
+			$clauses[] = $clause;
+
+		return $clauses;
+	}
+
+	/**
+	 * Check whether a requested token emitted one rendered WordPress clause.
+	 *
+	 * This mirrors the supported WP 6.3 parse_orderby() branches. Requested
+	 * inclusion and meta tokens are not necessarily rendered, so they must not
+	 * consume a later clause while metric ordering is reconstructed.
+	 *
+	 * @param string $token Requested orderby token.
+	 * @param object $query WP_Query instance.
+	 * @return bool
+	 */
+	private function did_wordpress_orderby_token_emit_clause( $token, $query ) {
+		$token = (string) $token;
+		$meta_clauses = is_object( $query->meta_query ) && method_exists( $query->meta_query, 'get_clauses' ) ? $query->meta_query->get_clauses() : [];
+		$meta_clauses = is_array( $meta_clauses ) ? $meta_clauses : [];
+		$primary_meta_clause = empty( $meta_clauses ) ? [] : reset( $meta_clauses );
+		$primary_meta_key = is_array( $primary_meta_clause ) && ! empty( $primary_meta_clause['key'] ) ? (string) $primary_meta_clause['key'] : '';
+
+		switch ( $token ) {
+			// WP_Query::parse_orderby() renders these direct fields and aliases.
+			case 'post_name':
+			case 'post_author':
+			case 'post_date':
+			case 'post_title':
+			case 'post_modified':
+			case 'post_parent':
+			case 'post_type':
+			case 'name':
+			case 'author':
+			case 'date':
+			case 'title':
+			case 'modified':
+			case 'parent':
+			case 'type':
+			case 'ID':
+			case 'menu_order':
+			case 'comment_count':
+			case 'rand':
+				return true;
+
+			case 'post__in':
+				return ! empty( $query->get( 'post__in' ) );
+
+			case 'post_name__in':
+				return ! empty( $query->get( 'post_name__in' ) );
+
+			case 'post_parent__in':
+				return ! empty( $query->get( 'post_parent__in' ) );
+
+			case 'meta_value':
+			case 'meta_value_num':
+				return ! empty( $meta_clauses );
+
+			case 'relevance':
+				// Core only emits search relevance for the standalone string token.
+				return ! empty( $query->get( 's' ) ) && $query->get( 'orderby' ) === 'relevance';
+		}
+
+		if ( $primary_meta_key !== '' && $token === $primary_meta_key )
+			return true;
+
+		if ( array_key_exists( $token, $meta_clauses ) )
+			return true;
+
+		return preg_match( '/^RAND\([0-9]+\)$/i', $token ) === 1;
+	}
+
+	/**
+	 * Preserve metric tokens at their original WP_Query orderby positions.
+	 *
+	 * @param mixed  $orderby Requested orderby value.
+	 * @param string $default_order Validated query-wide direction.
+	 * @return array
+	 */
+	private function get_metric_orderby_tokens( $orderby, $default_order ) {
+		$tokens = [];
+
+		if ( is_array( $orderby ) ) {
+			foreach ( $orderby as $key => $direction ) {
+				// a non-scalar direction (orderby[title][]=x) takes the default order
+				$order = is_scalar( $direction ) ? strtoupper( (string) $direction ) : $default_order;
+				$tokens[] = [
+					'metric' => (string) $key,
+					'order' => in_array( $order, [ 'ASC', 'DESC' ], true ) ? $order : $default_order
+				];
+			}
+
+			return $tokens;
+		}
+
+		$parts = preg_split( '/\s+/', trim( (string) $orderby ) );
+
+		for ( $index = 0; $index < count( $parts ); $index++ ) {
+			$order = $default_order;
+
+			if ( isset( $parts[$index + 1] ) && in_array( strtoupper( $parts[$index + 1] ), [ 'ASC', 'DESC' ], true ) )
+				$order = strtoupper( $parts[++$index] );
+
+			$tokens[] = [ 'metric' => $parts[$index], 'order' => $order ];
+		}
+
+		return $tokens;
 	}
 
 	/**
@@ -383,7 +549,7 @@ class Post_Views_Counter_Query {
 	 * @return string
 	 */
 	public function posts_distinct( $distinct, $query ) {
-		if ( ( ( isset( $query->pvc_groupby ) && $query->pvc_groupby ) || ( isset( $query->pvc_orderby ) && $query->pvc_orderby ) || ( isset( $query->pvc_query ) && $query->pvc_query ) || apply_filters( 'pvc_extend_post_object', false, $query ) === true ) && ( strpos( $distinct, 'DISTINCT' ) === false ) )
+		if ( ( ! empty( $query->pvc_groupby ) || ! empty( $query->pvc_orderby ) || ! empty( $query->pvc_query ) || apply_filters( 'pvc_extend_post_object', false, $query ) === true ) && strpos( $distinct, 'DISTINCT' ) === false )
 			$distinct = $distinct . ' DISTINCT ';
 
 		return $distinct;
@@ -397,8 +563,10 @@ class Post_Views_Counter_Query {
 	 * @return string
 	 */
 	public function posts_fields( $fields, $query ) {
-		if ( ( ! isset( $query->query['fields'] ) || $query->query['fields'] === '' || $query->query['fields'] === 'all' ) && ( ( isset( $query->pvc_orderby ) && $query->pvc_orderby ) || ( isset( $query->pvc_query ) && $query->pvc_query ) || apply_filters( 'pvc_extend_post_object', false, $query ) === true ) )
-			$fields = $fields . ', SUM( COALESCE( pvc.count, 0 ) ) AS post_views';
+		if ( ! isset( $query->query['fields'] ) || $query->query['fields'] === '' || $query->query['fields'] === 'all' ) {
+			if ( ! empty( $query->pvc_orderby ) || ! empty( $query->pvc_query ) || apply_filters( 'pvc_extend_post_object', false, $query ) === true )
+				$fields .= ', SUM( COALESCE( pvc.count, 0 ) ) AS post_views';
+		}
 
 		return $fields;
 	}
@@ -494,13 +662,13 @@ class Post_Views_Counter_Query {
 	 * @return array
 	 */
 	public function the_posts( $posts, $query ) {
-		if ( ( isset( $query->pvc_orderby ) && $query->pvc_orderby ) || ( isset( $query->pvc_query ) && $query->pvc_query ) || apply_filters( 'pvc_extend_post_object', false, $query ) === true ) {
+		if ( ! empty( $query->pvc_orderby ) || ! empty( $query->pvc_query ) || apply_filters( 'pvc_extend_post_object', false, $query ) === true ) {
 			$sum = 0;
 
 			// any posts found?
 			if ( ! empty( $posts ) ) {
 				foreach ( $posts as $post ) {
-					if ( ! empty( $post->post_views ) )
+					if ( is_object( $post ) && ! empty( $post->post_views ) )
 						$sum += (int) $post->post_views;
 				}
 			}

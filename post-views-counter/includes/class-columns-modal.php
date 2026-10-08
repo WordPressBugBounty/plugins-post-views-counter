@@ -62,22 +62,92 @@ class Post_Views_Counter_Columns_Modal {
 		wp_register_style( 'pvc-column-modal', POST_VIEWS_COUNTER_URL . '/css/admin-columns.css', [], $pvc->defaults['version'] );
 		wp_register_script( 'pvc-column-modal', POST_VIEWS_COUNTER_URL . '/js/admin-columns.js', [ 'jquery', 'pvc-chartjs', 'pvc-micromodal' ], $pvc->defaults['version'], true );
 
-		// localize script
-		wp_add_inline_script( 'pvc-admin-columns', 'var pvcColumnModal = ' . wp_json_encode( [
-			'ajaxURL'	=> admin_url( 'admin-ajax.php' ),
-			'nonce'		=> wp_create_nonce( 'pvc-column-modal' ),
-			'i18n'		=> [
-				'loading'		=> __( 'Loading...', 'post-views-counter' ),
-				'close'			=> __( 'Close', 'post-views-counter' ), 
-				'error'			=> __( 'An error occurred while loading data.', 'post-views-counter' ),
-				'summary'		=> __( 'Total views in this period:', 'post-views-counter' ),
-				'view'			=> __( 'view', 'post-views-counter' ),
-				'views'			=> __( 'views', 'post-views-counter' )
-			]
-		] ) . "\n", 'before' );
+		$extension_owns_modal = $this->extension_modal_owner_is_loaded();
+		$current_extension_owner = $extension_owns_modal && $this->extension_modal_owner_replaces_base_later();
 
-		// add modal HTML to footer
-		add_action( 'admin_footer', [ $this, 'render_modal_html' ] );
+		// The configuration is created once by the base plugin. A compatible modal
+		// owner transfers this script data to its controller. Legacy extensions supply
+		// their own declaration, so the base must not add a second assignment.
+		if ( ! $extension_owns_modal || $current_extension_owner )
+			wp_add_inline_script( 'pvc-admin-columns', 'var pvcColumnModal = ' . wp_json_encode( $this->get_modal_config( $extension_owns_modal ) ) . "\n", 'before' );
+
+		// A loaded extension modal owner renders its own compatible footer markup.
+		// Do not rely on a released extension removing this callback after registration.
+		if ( ! $extension_owns_modal )
+			add_action( 'admin_footer', [ $this, 'render_modal_html' ] );
+	}
+
+	/**
+	 * Build the private configuration shared by the base and extension modal
+	 * controllers.
+	 *
+	 * @param bool $extension_owns_modal Whether a compatible extension footer
+	 *                                   owner is loaded.
+	 * @return array
+	 */
+	private function get_modal_config( $extension_owns_modal ) {
+		return [
+			'ajaxURL'			=> admin_url( 'admin-ajax.php' ),
+			'nonce'				=> wp_create_nonce( 'pvc-column-modal' ),
+			'handlerNamespace'	=> 'pvcCoreModal',
+			'modalOwner'		=> $extension_owns_modal ? 'pro' : 'core',
+			'i18n'				=> [
+				'loading'				=> __( 'Loading...', 'post-views-counter' ),
+				'close'					=> __( 'Close', 'post-views-counter' ),
+				'error'					=> __( 'An error occurred while loading data.', 'post-views-counter' ),
+				'summary'				=> __( 'Views in this period:', 'post-views-counter' ),
+				'retry'					=> __( 'Retry', 'post-views-counter' ),
+				'view'					=> __( 'view', 'post-views-counter' ),
+				'views'					=> __( 'views', 'post-views-counter' )
+			]
+		];
+	}
+
+	/**
+	 * Check whether an instantiated extension modal renderer owns this request.
+	 *
+	 * Class presence alone is insufficient: partial extension bootstraps must leave
+	 * the base modal active until an actual renderer callback is registered.
+	 *
+	 * @return bool
+	 */
+	private function extension_modal_owner_is_loaded() {
+		global $wp_filter;
+
+		if ( ! class_exists( 'Post_Views_Counter_Pro_Columns_Modal' ) || ! isset( $wp_filter['admin_footer'] ) )
+			return false;
+
+		foreach ( $wp_filter['admin_footer']->callbacks as $callbacks ) {
+			foreach ( $callbacks as $callback ) {
+				if ( ! is_array( $callback['function'] ) || ! isset( $callback['function'][0], $callback['function'][1] ) )
+					continue;
+
+				if ( $callback['function'][1] === 'render_modal_html' && is_a( $callback['function'][0], 'Post_Views_Counter_Pro_Columns_Modal' ) )
+					return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * Check whether the loaded extension owner transfers base script data at
+	 * priority 30.
+	 *
+	 * @return bool
+	 */
+	private function extension_modal_owner_replaces_base_later() {
+		global $wp_filter;
+
+		if ( ! isset( $wp_filter['admin_enqueue_scripts']->callbacks[30] ) )
+			return false;
+
+		foreach ( $wp_filter['admin_enqueue_scripts']->callbacks[30] as $callback ) {
+			if ( is_array( $callback['function'] ) && isset( $callback['function'][0], $callback['function'][1] ) && $callback['function'][1] === 'remove_base_modal' && is_a( $callback['function'][0], 'Post_Views_Counter_Pro_Columns_Modal' ) )
+				return true;
+		}
+
+		return false;
 	}
 
 	/**
@@ -114,102 +184,86 @@ class Post_Views_Counter_Columns_Modal {
 		if ( ! in_array( $post->post_type, $post_types, true ) )
 			wp_send_json_error( [ 'message' => __( 'Post type is not tracked.', 'post-views-counter' ) ] );
 
+		// the same rule as the chart link in the list column
+		if ( ! $pvc->columns || ! $pvc->columns->current_user_can_view_post_chart( $post ) )
+			wp_send_json_error( [ 'message' => __( 'Access denied for this post.', 'post-views-counter' ) ] );
+
 		// check display permission for this specific post
 		if ( apply_filters( 'pvc_admin_display_post_views', true, $post_id ) === false )
 			wp_send_json_error( [ 'message' => __( 'Access denied for this post.', 'post-views-counter' ) ] );
 
 		// get period (format: YYYYMM or empty for current month)
-		$period_str = isset( $_POST['period'] ) && ! empty( $_POST['period'] ) ? preg_replace( '/[^0-9]/', '', $_POST['period'] ) : '';
+		if ( isset( $_POST['period'] ) && ! is_scalar( $_POST['period'] ) )
+			wp_send_json_error( [ 'message' => __( 'Invalid period.', 'post-views-counter' ) ] );
+
+		$period_str = isset( $_POST['period'] ) && ! empty( $_POST['period'] ) ? preg_replace( '/[^0-9]/', '', wp_unslash( (string) $_POST['period'] ) ) : '';
 
 		// parse period or use current
-		if ( $period_str && strlen( $period_str ) === 6 ) {
-			$year = substr( $period_str, 0, 4 );
-			$month = substr( $period_str, 4, 2 );
-			$date = DateTime::createFromFormat( 'Y-m', $year . '-' . $month, wp_timezone() );
-			
-			if ( ! $date )
-				$date = new DateTime( 'now', wp_timezone() );
-		} else {
-			$date = new DateTime( 'now', wp_timezone() );
-		}
+		$date = $this->get_requested_month( $period_str, $this->get_counting_now() );
 
 		$year = $date->format( 'Y' );
 		$month = $date->format( 'm' );
 		$last_day = $date->format( 't' );
 
-		// fetch views data
+		wp_send_json_success( $this->get_paired_column_chart_data( $post, (int) $year, (int) $month, (int) $last_day ) );
+	}
+
+	/**
+	 * Build the Views modal response with the shared metric dataset style.
+	 *
+	 * The released total_views and period_has_data keys are kept for any
+	 * consumer of the legacy payload.
+	 *
+	 * @param WP_Post $post Post object.
+	 * @param int     $year Requested year.
+	 * @param int     $month Requested month.
+	 * @param int     $last_day Days in the requested month.
+	 * @return array
+	 */
+	private function get_paired_column_chart_data( $post, $year, $month, $last_day ) {
+		$pvc = Post_Views_Counter();
 		$views = pvc_get_views( [
-			'post_id'		=> $post_id,
-			'post_type'		=> $post->post_type,
-			'fields'		=> 'date=>views',
-			'views_query'	=> [
-				'year'	=> (int) $year,
-				'month'	=> (int) $month
-			]
+			'post_id' => $post->ID,
+			'post_type' => $post->post_type,
+			'fields' => 'date=>views',
+			'views_query' => [ 'year' => $year, 'month' => $month ]
 		] );
-
-		// get colors
-		$colors = $pvc->functions->get_colors();
-
-		// prepare response data
 		$data = [
-			'post_id'	=> $post_id,
-			'post_title'=> get_the_title( $post_id ),
-			'period'	=> $year . $month,
-			'design'		=> [
-				'fill'					=> true,
-				'backgroundColor'		=> 'rgba(' . $colors['r'] . ',' . $colors['g'] . ',' . $colors['b'] . ', 0.2)',
-				'borderColor'			=> 'rgba(' . $colors['r'] . ',' . $colors['g'] . ',' . $colors['b'] . ', 1)',
-				'borderWidth'			=> 1.2,
-				'borderDash'			=> [],
-				'pointBorderColor'		=> 'rgba(' . $colors['r'] . ',' . $colors['g'] . ',' . $colors['b'] . ', 1)',
-				'pointBackgroundColor'	=> 'rgba(255, 255, 255, 1)',
-				'pointBorderWidth'		=> 1.2
-			],
-			'data'		=> [
-				'labels'	=> [],
-				'dates'		=> [],
-				'datasets'	=> [
-					[
-						'label'	=> get_the_title( $post_id ),
-						'data'	=> []
-					]
+			'post_id' => (int) $post->ID,
+			'post_title' => get_the_title( $post->ID ),
+			'period' => sprintf( '%04d%02d', $year, $month ),
+			'dates_html' => $this->generate_modal_dates( $year, $month ),
+			'data' => [
+				'labels' => [],
+				'dates' => [],
+				'datasets' => [
+					array_merge( [
+						'metric' => 'views',
+						'label' => __( 'Views', 'post-views-counter' ),
+						'data' => []
+					], $pvc->functions->get_metric_dataset_style( 'views', 'line', [ 'fill' => true ] ) )
 				]
-			]
+			],
+			'totals' => [ 'views' => 0 ]
 		];
 
-		// generate dates and data
-		for ( $i = 1; $i <= $last_day; $i++ ) {
-			$date_key = $year . $month . str_pad( $i, 2, '0', STR_PAD_LEFT );
-			
-			// labels: show only odd days
-			$data['data']['labels'][] = ( $i % 2 === 0 ? '' : $i );
-			
-			// formatted dates for tooltips
-			$data['data']['dates'][] = date_i18n( get_option( 'date_format' ), strtotime( $year . '-' . $month . '-' . str_pad( $i, 2, '0', STR_PAD_LEFT ) ) );
-			
-			// view count
+		$timezone = wp_timezone();
+
+		for ( $day = 1; $day <= $last_day; $day++ ) {
+			$date_key = sprintf( '%04d%02d%02d', $year, $month, $day );
+			$timestamp = ( new DateTimeImmutable( sprintf( '%04d-%02d-%02d 00:00:00', $year, $month, $day ), $timezone ) )->getTimestamp();
+
+			$data['data']['labels'][] = $day % 2 === 0 ? '' : $day;
+			$data['data']['dates'][] = wp_date( get_option( 'date_format' ), $timestamp, $timezone );
 			$data['data']['datasets'][0]['data'][] = isset( $views[$date_key] ) ? (int) $views[$date_key] : 0;
 		}
 
-		// calculate total views for the period
-		$data['total_views'] = array_sum( $data['data']['datasets'][0]['data'] );
+		$data['totals']['views'] = array_sum( $data['data']['datasets'][0]['data'] );
+		$data['total_views'] = $data['totals']['views'];
+		$data['period_has_data'] = $data['totals']['views'] > 0;
+		$data['data'] = Post_Views_Counter()->functions->format_chart_datasets( $data['data'] );
 
-		// check if there is any period-specific data
-		$period_has_data = false;
-		foreach ( $data['data']['datasets'][0]['data'] as $val ) {
-			if ( (int) $val > 0 ) {
-				$period_has_data = true;
-				break;
-			}
-		}
-
-		$data['period_has_data'] = $period_has_data;
-
-		// generate date navigation HTML
-		$data['dates_html'] = $this->generate_modal_dates( (int) $year, (int) $month );
-
-		wp_send_json_success( $data );
+		return $data;
 	}
 
 	/**
@@ -219,34 +273,77 @@ class Post_Views_Counter_Columns_Modal {
 	 * @param int $month
 	 * @return string
 	 */
-	private function generate_modal_dates( $year, $month ) {
-		// previous month
-		$prev_date = DateTime::createFromFormat( 'Y-m', $year . '-' . $month, wp_timezone() );
-		$prev_date->modify( '-1 month' );
-		
-		// next month
-		$next_date = DateTime::createFromFormat( 'Y-m', $year . '-' . $month, wp_timezone() );
-		$next_date->modify( '+1 month' );
-		
-		// current
-		$current_date = DateTime::createFromFormat( 'Y-m', $year . '-' . $month, wp_timezone() );
-		
-		// check if next is in the future
-		$now = new DateTime( 'now', wp_timezone() );
-		$can_go_next = $next_date <= $now;
-		
+	private function generate_modal_dates( $year, $month, $now = null ) {
+		$timezone = wp_timezone();
+
+		if ( ! ( $now instanceof DateTimeInterface ) )
+			$now = $this->get_counting_now();
+
+		$current_date = $this->parse_month( sprintf( '%04d-%02d', $year, $month ) );
+
+		if ( ! $current_date )
+			$current_date = $this->parse_month( $now->format( 'Y-m' ) );
+
+		$prev_date = $current_date->modify( '-1 month' );
+		$next_date = $current_date->modify( '+1 month' );
+
+		// next is available once its month has started in the counting clock
+		$can_go_next = (int) $next_date->format( 'Ym' ) <= (int) $now->format( 'Ym' );
+
 		$html = '<div class="pvc-modal-nav">';
-		$html .= '<a href="#" class="pvc-modal-nav-prev" data-period="' . $prev_date->format( 'Ym' ) . '">‹ ' . date_i18n( 'F Y', $prev_date->getTimestamp() ) . '</a>';
-		$html .= '<span class="pvc-modal-nav-current">' . date_i18n( 'F Y', $current_date->getTimestamp() ) . '</span>';
+		$html .= '<a href="#" class="pvc-modal-nav-prev" data-period="' . $prev_date->format( 'Ym' ) . '">‹ ' . wp_date( 'F Y', $prev_date->getTimestamp(), $timezone ) . '</a>';
+		$html .= '<span class="pvc-modal-nav-current">' . wp_date( 'F Y', $current_date->getTimestamp(), $timezone ) . '</span>';
 		
 		if ( $can_go_next )
-			$html .= '<a href="#" class="pvc-modal-nav-next" data-period="' . $next_date->format( 'Ym' ) . '">' . date_i18n( 'F Y', $next_date->getTimestamp() ) . ' ›</a>';
+			$html .= '<a href="#" class="pvc-modal-nav-next" data-period="' . $next_date->format( 'Ym' ) . '">' . wp_date( 'F Y', $next_date->getTimestamp(), $timezone ) . ' ›</a>';
 		else
-			$html .= '<span class="pvc-modal-nav-next pvc-disabled">' . date_i18n( 'F Y', $next_date->getTimestamp() ) . ' ›</span>';
+			$html .= '<span class="pvc-modal-nav-next pvc-disabled">' . wp_date( 'F Y', $next_date->getTimestamp(), $timezone ) . ' ›</span>';
 		
 		$html .= '</div>';
 		
 		return $html;
+	}
+
+	/**
+	 * Get the current time in the clock that buckets the stored periods.
+	 *
+	 * @return DateTimeImmutable
+	 */
+	private function get_counting_now() {
+		return new DateTimeImmutable( 'now', Post_Views_Counter_Visits_Query::get_timezone() );
+	}
+
+	/**
+	 * Get the first day of the requested month, or of the current month in the
+	 * counting clock when none (or an invalid one) is requested.
+	 *
+	 * @param string            $period_str Requested period in YYYYMM format, or empty.
+	 * @param DateTimeInterface $now Current time in the counting clock.
+	 * @return DateTimeImmutable
+	 */
+	private function get_requested_month( $period_str, $now ) {
+		$date = false;
+
+		if ( $period_str && strlen( $period_str ) === 6 )
+			$date = $this->parse_month( substr( $period_str, 0, 4 ) . '-' . substr( $period_str, 4, 2 ) );
+
+		return $date ? $date : $this->parse_month( $now->format( 'Y-m' ) );
+	}
+
+	/**
+	 * Parse one exact calendar month without inheriting the current day.
+	 *
+	 * @param string $value Month in Y-m format.
+	 * @return DateTimeImmutable|false
+	 */
+	private function parse_month( $value ) {
+		$date = DateTimeImmutable::createFromFormat( '!Y-m', $value, wp_timezone() );
+		$errors = DateTimeImmutable::getLastErrors();
+
+		if ( ! $date || ( is_array( $errors ) && ( ! empty( $errors['warning_count'] ) || ! empty( $errors['error_count'] ) ) ) || $date->format( 'Y-m' ) !== $value )
+			return false;
+
+		return $date;
 	}
 
 	/**
@@ -266,21 +363,22 @@ class Post_Views_Counter_Columns_Modal {
 					<div class="pvc-modal__content">
 						<div class="pvc-modal-content-top">
 							<div class="pvc-modal-summary">
-								<span class="pvc-modal-views-label"></span>
+								<span class="pvc-modal-views-label"><?php esc_html_e( 'Views in this period:', 'post-views-counter' ); ?></span>
 								<span class="pvc-modal-views-data">
-									<span class="pvc-modal-count"></span>
+									<span class="pvc-modal-count pvc-modal-count-views"></span>
 								</span>
 							</div>
-                            <div class="pvc-modal-tabs" role="tablist">
-								<button type="button" class="pvc-modal-tab pvc-pro" disabled><span><?php _e( 'Year', 'post-views-counter' ); ?></span></button>
-								<button type="button" class="pvc-modal-tab active"><span><?php _e( 'Month', 'post-views-counter' ); ?></span></button>
-								<button type="button" class="pvc-modal-tab pvc-pro" disabled><span><?php _e( 'Week', 'post-views-counter' ); ?></span></button>
+	                            <div class="pvc-modal-tabs" role="group" aria-label="<?php esc_attr_e( 'Chart period', 'post-views-counter' ); ?>">
+								<button type="button" class="pvc-modal-tab pvc-pro" disabled aria-pressed="false"><span><?php _e( 'Year', 'post-views-counter' ); ?></span></button>
+								<button type="button" class="pvc-modal-tab active" aria-pressed="true"><span><?php _e( 'Month', 'post-views-counter' ); ?></span></button>
+								<button type="button" class="pvc-modal-tab pvc-pro" disabled aria-pressed="false"><span><?php _e( 'Week', 'post-views-counter' ); ?></span></button>
 							</div>
 						</div>
-						<div class="pvc-modal-chart-container">
-						    <canvas id="pvc-modal-chart" height="200"></canvas>
-							<span class="spinner"></span>
-						</div>
+							<div id="pvc-modal-chart-panel" class="pvc-modal-chart-container">
+							    <canvas id="pvc-modal-chart" height="200"></canvas>
+								<span class="spinner"></span>
+							</div>
+							<div class="pvc-modal-status" role="status" aria-live="polite"></div>
                         <div class="pvc-modal-content-middle" style="display: none;">
 							<div class="pvc-modal-insights">
                                 <div class="pvc-insight pvc-insight-lock pvc-modal-insights-empty">

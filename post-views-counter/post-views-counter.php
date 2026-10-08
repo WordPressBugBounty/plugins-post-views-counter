@@ -1,8 +1,8 @@
 <?php
 /*
 Plugin Name: Post Views Counter
-Description: Post Views Counter allows you to collect and display how many times a post, page, or other content has been viewed in a simple, fast and reliable way.
-Version: 1.7.15
+Description: Count and display post views, track site-wide visits, and see what content works – inside WordPress. Fast, easy to use and privacy-first.
+Version: 1.8.0
 Author: dFactory
 Author URI: https://dfactory.co/
 Plugin URI: https://postviewscounter.com/
@@ -10,6 +10,8 @@ License: MIT License
 License URI: https://opensource.org/licenses/MIT
 Text Domain: post-views-counter
 Domain Path: /languages
+Requires at least: 6.4
+Requires PHP: 7.4
 
 Post Views Counter
 Copyright (C) 2014-2026, Digital Factory - info@digitalfactory.pl
@@ -30,7 +32,7 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 	 * Post Views Counter final class.
 	 *
 	 * @class Post_Views_Counter
-	 * @version	1.7.15
+	 * @version	1.8.0
 	 */
 	final class Post_Views_Counter {
 
@@ -77,7 +79,9 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 				'update_delay_date'		=> 0
 			],
 			'display'	=> [
-				'label'					=> 'Post Views:',
+				'label'					=> 'Views:',
+				'frontend_counter_metrics'	=> 'views',
+				'frontend_template'		=> '%%icon%% Views: %%views%%',
 				'display_period'		=> 'total',
 				'taxonomies'			=> false,
 				'taxonomies_display'	=> [],
@@ -143,10 +147,11 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 				],
 				'schedule_version'		=> 1
 			],
-			'version'	=> '1.7.15'
+			'version'	=> '1.8.0'
 		];
 
 		// instances
+		public $columns;
 		public $counter;
 		public $crawler;
 		public $cron;
@@ -157,6 +162,7 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 		public $settings;
 		public $settings_api;
 		public $import;
+		public $visits;
 
 		/**
 		 * Disable object cloning.
@@ -183,10 +189,13 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 
 				// short init?
 				if ( defined( 'SHORTINIT' ) && SHORTINIT ) {
+					include_once( POST_VIEWS_COUNTER_PATH . 'includes/class-visits-query.php' );
+					include_once( POST_VIEWS_COUNTER_PATH . 'includes/class-visits.php' );
 					include_once( POST_VIEWS_COUNTER_PATH . 'includes/class-counter.php' );
 					include_once( POST_VIEWS_COUNTER_PATH . 'includes/class-crawler-detect.php' );
 					include_once( POST_VIEWS_COUNTER_PATH . 'includes/functions.php' );
 
+					self::$instance->visits = new Post_Views_Counter_Visits();
 					self::$instance->counter = new Post_Views_Counter_Counter();
 					self::$instance->crawler = new Post_Views_Counter_Crawler_Detect();
 
@@ -210,6 +219,7 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 
 					// initialize other classes
 					self::$instance->functions = new Post_Views_Counter_Functions();
+					self::$instance->visits = new Post_Views_Counter_Visits();
 
 					new Post_Views_Counter_Update();
 
@@ -223,7 +233,7 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 					self::$instance->cron = new Post_Views_Counter_Cron();
 					self::$instance->counter = new Post_Views_Counter_Counter();
 
-					new Post_Views_Counter_Columns();
+					self::$instance->columns = new Post_Views_Counter_Columns();
 					new Post_Views_Counter_Columns_Modal();
 					new Post_Views_Counter_Traffic_Signals();
 					new Post_Views_Counter_Toolbar();
@@ -261,7 +271,9 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 		 * @return void
 		 */
 		private function includes() {
+			include_once( POST_VIEWS_COUNTER_PATH . 'includes/class-visits-query.php' );
 			include_once( POST_VIEWS_COUNTER_PATH . 'includes/class-functions.php' );
+			include_once( POST_VIEWS_COUNTER_PATH . 'includes/class-visits.php' );
 			include_once( POST_VIEWS_COUNTER_PATH . 'includes/class-update.php' );
 			include_once( POST_VIEWS_COUNTER_PATH . 'includes/class-settings-api.php' );
 			include_once( POST_VIEWS_COUNTER_PATH . 'includes/class-settings.php' );
@@ -289,7 +301,9 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 			include_once( POST_VIEWS_COUNTER_PATH . 'includes/class-crawler-detect.php' );
 			include_once( POST_VIEWS_COUNTER_PATH . 'includes/class-frontend.php' );
 			include_once( POST_VIEWS_COUNTER_PATH . 'includes/class-dashboard.php' );
+			include_once( POST_VIEWS_COUNTER_PATH . 'includes/class-dashboard-comparison.php' );
 			include_once( POST_VIEWS_COUNTER_PATH . 'includes/class-widgets.php' );
+			include_once( POST_VIEWS_COUNTER_PATH . 'includes/class-entrances-eligibility.php' );
 			include_once( POST_VIEWS_COUNTER_PATH . 'includes/class-traffic-signals.php' );
 			include_once( POST_VIEWS_COUNTER_PATH . 'includes/class-integration-gutenberg.php' );
 		}
@@ -938,9 +952,14 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 		 * @return void
 		 */
 		public function activation( $network ) {
+			$activation_failed = false;
+
 			// network activation?
 			if ( is_multisite() && $network ) {
 				global $wpdb;
+
+				if ( $this->visits instanceof Post_Views_Counter_Visits )
+					$this->visits->reset_network_schema_migration();
 
 				// get all available sites
 				$blogs_ids = $wpdb->get_col( 'SELECT blog_id FROM ' . $wpdb->blogs );
@@ -949,13 +968,26 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 					// change to another site
 					switch_to_blog( (int) $blog_id );
 
-					// run current site activation process
-					$this->activate_site();
+					try {
+						// Keep network activation on its existing work profile. The bounded
+						// network cursor adds and verifies Visits after activation returns.
+							$activation_failed = ! $this->activate_site_internal( false, true );
+						} finally {
+							restore_current_blog();
+						}
 
-					restore_current_blog();
-				}
+						if ( $activation_failed )
+							break;
+					}
+
+				if ( $this->visits instanceof Post_Views_Counter_Visits )
+					$this->visits->schedule_schema_sweep();
+
 			} else
-				$this->activate_site();
+				$activation_failed = ! $this->activate_site_internal( true, true );
+
+			if ( $activation_failed )
+				wp_die( esc_html__( 'Post Views Counter could not safely recover data from a previous destructive deactivation. Retry activation after checking the database.', 'post-views-counter' ) );
 		}
 
 		/**
@@ -967,33 +999,87 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 		 * @return void
 		 */
 		public function activate_site() {
+			$this->activate_site_internal( true, false );
+		}
+
+		/**
+		 * Activate one site with internal migration control.
+		 *
+		 * @global object $wpdb
+		 * @global string $charset_collate
+		 *
+		 * @param bool $migrate_visits Whether to add and verify the Visits schema now.
+		 * @param bool $explicit Whether explicit activation may clear a tombstone.
+		 * @return bool
+		 */
+		private function activate_site_internal( $migrate_visits, $explicit = false ) {
 			global $wpdb, $charset_collate;
+			$activation_state = $this->visits instanceof Post_Views_Counter_Visits ? $this->visits->prepare_site_activation( $explicit ) : 'normal';
 
-			// required for dbdelta
-			require_once( ABSPATH . 'wp-admin/includes/upgrade.php' );
+			if ( $activation_state === false )
+				return false;
 
-			// create post views table
-			dbDelta( '
+			try {
+				if ( $activation_state === 'tombstone' ) {
+					$table = $wpdb->prefix . 'post_views';
+					$wpdb->last_error = '';
+					$dropped = $wpdb->query( 'DROP TABLE IF EXISTS ' . $table );
+					$remaining = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table ) );
+
+					if ( $dropped === false || $wpdb->last_error !== '' || $remaining !== null )
+						return false;
+				}
+
+				// required for dbdelta
+				require_once( ABSPATH . 'wp-admin/includes/upgrade.php' );
+
+				// create post views table
+				dbDelta( '
 				CREATE TABLE IF NOT EXISTS ' . $wpdb->prefix . 'post_views (
 					`id` bigint unsigned NOT NULL,
 					`type` tinyint(1) unsigned NOT NULL,
 					`period` varchar(8) NOT NULL,
 					`count` bigint unsigned NOT NULL,
+					' . ( $migrate_visits ? '`visits` bigint unsigned NOT NULL DEFAULT 0,' : '' ) . '
 					PRIMARY KEY  (type, period, id),
 					UNIQUE INDEX id_type_period_count (id, type, period, count) USING BTREE,
 					INDEX type_period_count (type, period, count) USING BTREE
 				) ' . $charset_collate . ';'
-			);
+				);
 
-			// add default options
-			add_option( 'post_views_counter_settings_general', $this->defaults['general'], null, false );
-			add_option( 'post_views_counter_settings_display', $this->defaults['display'], null, false );
-			add_option( 'post_views_counter_settings_other', $this->defaults['other'], null, false );
-			add_option( 'post_views_counter_settings_emails', $this->get_default_emails_settings(), null, false );
-			add_option( 'post_views_counter_version', $this->defaults['version'], null, false );
+				if ( $activation_state === 'tombstone' ) {
+					$wpdb->last_error = '';
+					$row_count = $wpdb->get_var( 'SELECT COUNT(*) FROM ' . $wpdb->prefix . 'post_views' );
 
-			if ( $this->emails_scheduler instanceof Post_Views_Counter_Emails_Scheduler )
-				$this->emails_scheduler->maybe_schedule( get_option( 'post_views_counter_settings_emails', $this->get_default_emails_settings() ) );
+					if ( $wpdb->last_error !== '' || (int) $row_count !== 0 || ! $this->visits->complete_site_activation() )
+						return false;
+				}
+
+				// Verify the additive Visits schema for single-site activation and
+				// newly initialized sites. Network activation defers this work.
+				$visits_ready = ! $migrate_visits || ( $this->visits instanceof Post_Views_Counter_Visits && $this->visits->migrate_schema( true ) );
+
+				// add default options
+				add_option( 'post_views_counter_settings_general', $this->defaults['general'], null, false );
+				add_option( 'post_views_counter_settings_display', $this->defaults['display'], null, false );
+				add_option( 'post_views_counter_settings_other', $this->defaults['other'], null, false );
+				add_option( 'post_views_counter_settings_emails', $this->get_default_emails_settings(), null, false );
+				add_option( 'post_views_counter_version', $this->defaults['version'], null, false );
+
+				if ( $migrate_visits && $visits_ready && $this->visits instanceof Post_Views_Counter_Visits )
+					$this->visits->refresh_availability( true );
+
+				if ( $this->emails_scheduler instanceof Post_Views_Counter_Emails_Scheduler )
+					$this->emails_scheduler->maybe_schedule( get_option( 'post_views_counter_settings_emails', $this->get_default_emails_settings() ) );
+
+				if ( $this->visits instanceof Post_Views_Counter_Visits )
+					$this->visits->schedule_schema_sweep();
+
+				return $visits_ready;
+			} finally {
+				if ( $this->visits instanceof Post_Views_Counter_Visits )
+					$this->visits->finish_site_activation();
+			}
 		}
 
 		/**
@@ -1024,19 +1110,36 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 			// network deactivation?
 			if ( is_multisite() && $network ) {
 				global $wpdb;
+				$blocked_deactivation = false;
 
 				// get all available sites
 				$blogs_ids = $wpdb->get_col( 'SELECT blog_id FROM ' . $wpdb->blogs );
 
 				foreach ( $blogs_ids as $blog_id ) {
-					// change to another site
-					switch_to_blog( (int) $blog_id );
+					$switched = (int) get_current_blog_id() !== (int) $blog_id;
 
-					// run current site deactivation process
-					$this->deactivate_site( true );
+					// Avoid an unnecessary callback-capable switch for the origin site.
+					if ( $switched )
+						switch_to_blog( (int) $blog_id );
 
-					restore_current_blog();
+					try {
+						// run current site deactivation process
+						$deactivation = $this->deactivate_site_internal( true );
+						$blocked_deactivation = in_array( $deactivation, [ 'measurement_fence_unlock_failed', 'schema_lease_retry_blocked' ], true );
+					} finally {
+						// A failed UNLOCK TABLES leaves this connection restricted to the
+						// current site's locked tables. restore_current_blog() can dispatch
+						// callbacks, so preserve the switched context for request recovery.
+						if ( ! $blocked_deactivation && $switched )
+							restore_current_blog();
+					}
+
+					if ( $blocked_deactivation )
+						break;
 				}
+
+				if ( ! $blocked_deactivation && $this->visits instanceof Post_Views_Counter_Visits )
+					$this->visits->delete_network_state();
 			} else
 				$this->deactivate_site();
 		}
@@ -1051,20 +1154,75 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 		 * @return void
 		 */
 		public function deactivate_site( $multi = false ) {
-			if ( $this->emails_scheduler instanceof Post_Views_Counter_Emails_Scheduler )
-				$this->emails_scheduler->clear();
-			else
-				wp_clear_scheduled_hook( 'pvc_weekly_content_summary_send' );
+			$this->deactivate_site_internal( $multi );
+		}
 
+		/**
+		 * Deactivate one site and return an internal failed-unlock signal only to
+		 * the network coordinator. The public deactivate_site() API stays void.
+		 *
+		 * @param bool $multi
+		 * @return bool|string
+		 */
+		private function deactivate_site_internal( $multi = false ) {
 			if ( $multi === true ) {
 				$options = get_option( 'post_views_counter_settings_other', [] );
 				$check = is_array( $options ) && ! empty( $options['deactivation_delete'] );
 			} else
 				$check = $this->options['other']['deactivation_delete'];
 
+			if ( $check && $this->visits instanceof Post_Views_Counter_Visits ) {
+				$deletion = $this->visits->delete_site_state();
+
+				if ( $deletion === 'measurement_fence_unlock_failed' ) {
+					// Deactivation is a one-shot lifecycle event. The failed unlock keeps
+					// Core's FIFO, tombstone, and schema lease as durable retry obligations;
+					// do not move the derived boundary, clear schedules, or publish any acknowledgement.
+					error_log( 'Post Views Counter: destructive deactivation stopped because its protected table fence could not be released; retry deactivation after recovery.' );
+					return 'measurement_fence_unlock_failed';
+				}
+
+				if ( $deletion === 'schema_lease_retry_blocked' ) {
+					// A fresh retry cannot safely continue while the failed request's
+					// durable schema lease remains unexpired. Keep all lifecycle cleanup
+					// and acknowledgement work for the later takeover-capable retry.
+					error_log( 'Post Views Counter: destructive deactivation remains blocked by its retained schema lease; retry after lease expiry or takeover.' );
+					return 'schema_lease_retry_blocked';
+				}
+
+				if ( ! $deletion ) {
+					$check = false;
+					error_log( 'Post Views Counter: destructive deactivation was skipped because Visit cache state could not be retired safely.' );
+				}
+			}
+
+			if ( $check ) {
+				global $wpdb;
+				$table = $wpdb->prefix . 'post_views';
+				$wpdb->last_error = '';
+				$dropped = $wpdb->query( 'DROP TABLE IF EXISTS ' . $table );
+				$remaining = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table ) );
+
+				if ( $dropped === false || $wpdb->last_error !== '' || $remaining !== null ) {
+					$check = false;
+					error_log( 'Post Views Counter: destructive deactivation table cleanup failed; the queue-generation tombstone was retained.' );
+				}
+
+				if ( $this->visits instanceof Post_Views_Counter_Visits )
+					$this->visits->finish_site_state_deletion();
+			}
+
+			if ( ! $check && $this->visits instanceof Post_Views_Counter_Visits )
+				$this->visits->suspend_live_visit_writes( 'core_deactivated' );
+
+			if ( $this->emails_scheduler instanceof Post_Views_Counter_Emails_Scheduler )
+				$this->emails_scheduler->clear();
+			else
+				wp_clear_scheduled_hook( 'pvc_weekly_content_summary_send' );
+
 			// delete options if needed
 			if ( $check ) {
-				// Give a compatible Pro client one non-blocking opportunity to
+				// Give a compatible extension client one non-blocking opportunity to
 				// release the remote license before Free removes shared settings.
 				if ( function_exists( 'Post_Views_Counter_Pro' ) ) {
 					$pvcp = Post_Views_Counter_Pro();
@@ -1084,16 +1242,17 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 				// delete transients
 				delete_transient( 'post_views_counter_ip_cache' );
 
-				global $wpdb;
-
-				// delete table from database
-				$wpdb->query( 'DROP TABLE IF EXISTS ' . $wpdb->prefix . 'post_views' );
 			}
 
 			// remove schedule
 			wp_clear_scheduled_hook( 'pvc_reset_counts' );
 
+			if ( $this->visits instanceof Post_Views_Counter_Visits )
+				$this->visits->clear_schema_sweep();
+
 			remove_action( 'pvc_reset_counts', [ $this->cron, 'reset_counts' ] );
+
+			return true;
 		}
 
 		/**
@@ -1108,10 +1267,13 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 				// change to another site
 				switch_to_blog( $site->blog_id );
 
-				// run current site activation process
-				$this->activate_site();
-
-				restore_current_blog();
+				try {
+					// run current site activation process
+					if ( ! $this->activate_site_internal( true, false ) )
+						error_log( 'Post Views Counter: new-site initialization remained fail-closed.' );
+				} finally {
+					restore_current_blog();
+				}
 			}
 		}
 
@@ -1212,8 +1374,11 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 				wp_enqueue_script( 'pvc-admin-quick-edit' );
 
 				// prepare script data
+				// Bulk Edit counter writes happen server-side on the native
+				// bulk_edit_posts completion hook. No shipped script calls the
+				// retained save_bulk_post_views compatibility endpoint, so its
+				// nonce is no longer printed.
 				$script_data = [
-					'nonce'			=> wp_create_nonce( 'pvc_save_bulk_post_views' ),
 					'wpVersion59'	=> version_compare( $wp_version, '5.9', '>=' )
 				];
 

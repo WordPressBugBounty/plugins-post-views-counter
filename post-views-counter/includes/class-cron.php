@@ -29,11 +29,41 @@ class Post_Views_Counter_Cron {
 	 *
 	 * @global object $wpdb
 	 *
-	 * @return void
+	 * @return bool
 	 */
 	public function reset_counts() {
 		global $wpdb;
 
+		$days = $this->get_reset_interval_days();
+
+		// a zero or invalid interval keeps data regardless of age
+		if ( $days === 0 )
+			return true;
+
+		// default where clause
+		$where = [ 'type = 0', 'CAST( period AS SIGNED ) < CAST( ' . date( 'Ymd', strtotime( '-' . $days . ' days' ) ) . ' AS SIGNED)' ];
+
+		// update where clause
+		$where = apply_filters( 'pvc_reset_counts_where_clause', $where );
+		// Keep the established selection predicate. Retention deletes stored rows
+		// only; it never changes raw-read or derived eligibility boundaries.
+		$result = $wpdb->query( 'DELETE FROM ' . $wpdb->prefix . 'post_views WHERE ' . implode( ' AND ', $where ) );
+
+		if ( $result === false )
+			return false;
+
+		if ( class_exists( 'Post_Views_Counter_Visits_Query' ) )
+			Post_Views_Counter_Visits_Query::invalidate_read_cache();
+
+		return true;
+	}
+
+	/**
+	 * Get the cleanup interval in days.
+	 *
+	 * @return int Days, or 0 when the interval is zero or invalid
+	 */
+	private function get_reset_interval_days() {
 		$counter = [
 			'days'		=> 1,
 			'weeks'		=> 7,
@@ -44,14 +74,14 @@ class Post_Views_Counter_Cron {
 		// get main instance
 		$pvc = Post_Views_Counter();
 
-		// default where clause
-		$where = [ 'type = 0', 'CAST( period AS SIGNED ) < CAST( ' . date( 'Ymd', strtotime( '-' . ( (int) ( $counter[$pvc->options['general']['reset_counts']['type']] * $pvc->options['general']['reset_counts']['number'] ) ) . ' days' ) ) . ' AS SIGNED)' ];
+		$interval = isset( $pvc->options['general']['reset_counts'] ) && is_array( $pvc->options['general']['reset_counts'] ) ? $pvc->options['general']['reset_counts'] : [];
+		$type = isset( $interval['type'] ) && is_string( $interval['type'] ) ? $interval['type'] : '';
+		$number = isset( $interval['number'] ) && is_numeric( $interval['number'] ) ? (int) $interval['number'] : 0;
 
-		// update where clause
-		$where = apply_filters( 'pvc_reset_counts_where_clause', $where );
+		if ( ! isset( $counter[$type] ) || $number < 1 || $number > 999999 )
+			return 0;
 
-		// delete views
-		$wpdb->query( 'DELETE FROM ' . $wpdb->prefix . 'post_views WHERE ' . implode( ' AND ', $where ) );
+		return $counter[$type] * $number;
 	}
 
 	/**
@@ -89,8 +119,8 @@ class Post_Views_Counter_Cron {
 		// get main instance
 		$pvc = Post_Views_Counter();
 
-		// set wp cron task
-		if ( $pvc->options['general']['cron_run'] ) {
+		// set wp cron task, only for a valid positive interval
+		if ( $pvc->options['general']['cron_run'] && $this->get_reset_interval_days() > 0 ) {
 			// not set or need to be updated?
 			if ( ! wp_next_scheduled( 'pvc_reset_counts' ) || $pvc->options['general']['cron_update'] ) {
 				// task is added but need to be updated

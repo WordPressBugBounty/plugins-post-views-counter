@@ -1,56 +1,70 @@
 === Post Views Counter ===
 Contributors: dfactory
 Tags: counter, postviews, statistics, analytics, pageviews
-Requires at least: 6.3.0
-Requires PHP: 7.0
+Requires at least: 6.4
+Requires PHP: 7.4
 Tested up to: 7.1
-Stable tag: 1.7.15
+Stable tag: 1.8.0
 License: MIT
 License URI: http://opensource.org/licenses/MIT
 
-Post Views Counter allows you to collect and display how many times a post, page, or other content has been viewed in a simple, fast and reliable way.
+Count and display post views, track site-wide visits, and see what content works – inside WordPress. Fast, easy to use and privacy-first.
 
 == Description ==
 
-Post Views Counter allows you to collect and display how many times a post, page, or other content has been viewed in a simple, fast and reliable way.
+[Post Views Counter](https://postviewscounter.com/) counts how many times your posts, pages and other content are viewed, shows those counts on your site, and helps you see which content works – right inside WordPress. No external tools. No bloat. Just the numbers you need to see what’s working.
 
-[Post Views Counter](https://postviewscounter.com/) gives you clear, accurate post view stats — right inside WordPress. No external tools. No bloat. Just the numbers you need to see what’s working.
+It counts two things:
+
+- **Views** – Counted views of your selected posts, pages and other content, according to your counting settings. Views can be displayed on your site and used to sort content.
+- **Visits** – A Visit starts with a browser’s first counted view and covers subsequent counted content views within the fixed Count Interval. Visits are shown as site-wide totals beside Views, not per post.
 
 = Key Benefits =
 
 Clarity, speed, and control:
 
-- **Clear, Focused Metrics** — You get a clear picture of how your posts are performing.
-- **Made for WordPress** — Runs entirely in your site. No GA, no third-party pipes; accurate counts in your Dashboard.
-- **Privacy-first** — Data lives on your server, with controls that respect visitors’ rights and privacy regulations.
-- **Works at scale** — Minimal overhead, no external scripts, Multisite-ready.
-- **Display anywhere** — Automatically show counts, or place them exactly where you want via blocks or shortcode.
+- **Clear, Focused Metrics** – Views for every post and Visits for the whole site give you a clear picture of how your content is performing.
+- **Made for WordPress** – Runs entirely in your site. No GA, no third-party pipes; accurate counts in your Dashboard and post lists.
+- **Your counting rules** – Choose which content to count, exclude selected visitors, and set the interval for repeat counts.
+- **Privacy-first** – Views and Visits are stored as aggregate totals on your server. Browser storage helps prevent repeat counting within your Count Interval. Pro offers cookieless browser storage; its optional Strict Counts feature also caches IP-derived data to limit repeat counts.
+- **Works at scale** – Minimal overhead, no external scripts, Multisite-ready.
+- **Display anywhere** – Automatically show counts, or place them exactly where you want via blocks, shortcode or PHP.
 
 = Features =
 
 Practical features that matter:
 
 - Count & display views for **any post type** you select.
+- Count **Visits** and see them beside Views in the dashboard chart.
 - Three counting modes: **PHP, JavaScript, REST API**
-- Dashboard post views **stats widget**
-- Sortable Post Views **admin column**
+- **Post Views dashboard widget**: a chart of Views, Visits or both, with a Views comparison for the selected month. A month in progress is compared with the same days of the previous month.
+- **Top Posts dashboard widget**, month by month.
+- Sortable Post Views **admin column**, with a Views chart for each post.
+- **Traffic Signals** admin column that flags unusual traffic changes compared with the same days of the previous month.
+- **Weekly email summary** of how your content performed.
 - Exclude bots, logged-in users, specific roles, or IPs
 - Manually adjust a post’s views when needed.
 - Query and **order content by views** (developer-friendly)
 - Custom REST API endpoints
-- Option to set count interval
+- **Count Interval** to set the fixed window for repeat counts from the same browser.
 - One-click data import from **WP-PostViews**, **Statify** and **Page Views Count**
-- Post views **display position**, automatic or manual via shortcode
-- **Multisite** compatibile
+- Show the counter automatically, or place it with the **Post Views block**, shortcode or PHP function.
+- **Most Viewed Posts** block and widget.
+- **Multisite** compatible
 - **WPML/Polylang** compatible; translation-ready (.pot)
 
 = Post Views Counter Pro =
 
 More capability without extra complexity:
 
-- **Fast AJAX counting** for more accurate data.
-- **Caching optimization** that guarantees performance even under heavy traffic.
-- **Reports**: Views by Date, Post, Author to spot winners, trends, and top contributors.
+- **Fast AJAX counting** that keeps counting light on busy sites.
+- **Caching compatibility** and dynamic loading to count through cached pages and refresh displayed counts when a compatible counting mode is selected.
+- **Reports**: Views by Date, Post and Author to spot winners, trends and top contributors, plus **Visits in aggregate date reports**.
+- **Visit trends and Views per visit** in dashboard insights and email summaries.
+- **Performance Insights** that explain how a post’s Views changed, in the admin column, Traffic Signals and email summaries.
+- **Daily, weekly and monthly email summaries** with insights.
+- **Traffic sources**: aggregate stats on referrers, devices, browsers, operating systems and languages.
+- Views for **taxonomy terms, authors** and other archives.
 - Customizable **Views Period** (e.g., last 7/30 days) to control the views count timeframe.
 - **Export to CSV/XML** to download and share data.
 - **Integrations** for ordering by views in popular builders (e.g., **Elementor Pro, Divi, GenerateBlocks**).
@@ -69,15 +83,33 @@ For many frequently asked questions check the [Post Views Counter Docs](https://
 
 = Why use Post Views Counter vs Google Analytics? =
 
-Post Views Counter gives you clean, per-post view counts inside WordPress — fast, cache-friendly, and privacy-first, with data that stays on your server. Google Analytics might be an overkill when you just need accurate post/page views for editorial decisions.
+Post Views Counter gives you per-post Views and site-wide Visits inside WordPress. It is fast, easy to use and privacy-first, with counting data stored on your server and control over what, who and when you count. Google Analytics may be more than you need when you want content view statistics for editorial decisions.
 
 = Can I use Post Views Counter alongside Google Analytics? =
 
-Of course — many sites use both. Post Views Counter handles on-site, per-post view counts inside WordPress (no third-party scripts), while Google Analytics covers marketing funnels and acquisition.
+Of course – many sites use both. Post Views Counter handles on-site, per-post view counts inside WordPress (no third-party scripts), while Google Analytics covers marketing funnels and acquisition.
+
+= What is the difference between Views and Visits? =
+
+A View belongs to the content being viewed and is counted according to your counting settings. A Visit starts with a browser’s first counted view and covers subsequent counted content views within the fixed Count Interval. Viewing another eligible post within that window adds a View without starting another Visit. Later views do not extend the window.
+
+= Why do Visits differ from sessions in Google Analytics? =
+
+Post Views Counter follows the counting rules you choose: which content to count, which visitors to include or exclude, and how often to count them again. These rules may differ from your Google Analytics setup, so the totals are not expected to match.
+
+The time windows also differ. PVC starts a fixed Visit window with the first counted view, using your Count Interval – 24 hours by default. Later views do not extend it. Google Analytics 4 uses an inactivity timeout, which defaults to 30 minutes.
+
+= Why can’t I see Visits for a single post? =
+
+A Visit belongs to your site, not to a post – one Visit often covers several posts. Post Views Counter shows Views for each post and Visits as site-wide totals. Traffic Signals still notice when the visits that start on a post change unusually.
+
+= Why does the Visits chart show no data? =
+
+Visits start accumulating when Visit counting becomes available; earlier Views do not automatically become Visits. Setting Count Interval to 0 stops new Visits but preserves previously counted totals. If browser storage is unavailable, Views can still be counted but Visits are not inferred. Right after an update, the chart can briefly say that Visit data is not available while the database is prepared.
 
 = Is Post Views Counter GDPR compliant? =
 
-Post Views Counter runs entirely inside WordPress with no third-party scripts and keeps data on your server — aligning with GDPR-style expectations.
+Post Views Counter counts views and visits inside WordPress without third-party tracking scripts. Views and Visits are stored as aggregate totals on your server. To apply the Count Interval, it uses a first-party cookie in the visitor’s browser. Pro also offers cookieless browser storage; its optional Strict Counts feature caches IP-derived data associated with content and timestamps to limit repeat counts.
 
 = How do I get support? =
 
@@ -91,6 +123,31 @@ If you’ve purchased Post Views Counter Pro, your license includes one year of 
 2. screenshot-2.png
 
 == Changelog ==
+
+= 1.8.0 =
+* New: Site-wide Visits tracking.
+* New: Views, Visits and combined display modes in the Post Views dashboard chart.
+* New: Monthly Views comparisons in the Post Views dashboard widget.
+* New: Custom Format for frontend Views counters in Display settings, shortcodes and PHP functions.
+* New: Traffic Signals for changes in visits starting on a post.
+* Fix: Block editor counter editing permissions, duplicate saves and error reporting.
+* Fix: Counter input validation and Bulk Edit updates for saved posts.
+* Fix: Access checks for admin column Views charts.
+* Fix: Exclude non-post counts from post charts and summary emails.
+* Fix: Traffic Signals and modal periods follow Count Time, including month-end comparisons.
+* Fix: Preserve daily history when Cleanup Interval is set to 0.
+* Fix: Prevent false Traffic Signals when daily history is incomplete.
+* Fix: Keep keyboard focus inside the Views chart modal after navigating between periods.
+* Fix: Restore the Views counter in the block editor on WordPress 6.4.
+* Fix: Restore lifetime totals in pvc_get_views() when no period is specified.
+* Tweak: Limit form-based counter edits to the submitted post; use pvc_update_post_views() for programmatic updates.
+* Tweak: Use stored totals for manual Views edits, independently of pvc_get_post_views filters.
+* Tweak: Remove pvcArgsQuickEdit.nonce from post lists; retain the save_bulk_post_views AJAX action for compatibility.
+* Tweak: Reduce Traffic Signals reads to one database query per posts list page.
+* Tweak: Use native Views column sorting with a stable tie-break.
+* Tweak: Unify the frontend counter label to Views.
+* Tweak: Replace frontend Dashicons with a CSS counter icon.
+* Tweak: Retire the Icon Class setting; custom icons now require the pvc_counter_icon_class or pvc_counter_icon filter.
 
 = 1.7.15 =
 * Fix: Improve Statify import reliability with deterministic batching and collation-safe cursors.
@@ -494,5 +551,5 @@ Initial release
 
 == Upgrade Notice ==
 
-= 1.7.15 =
-Improves Statify import reliability and WordPress 7.1 editor compatibility.
+= 1.8.0 =
+Adds site-wide Visits, dashboard comparisons and Custom Format for the Views counter, with counting and editing fixes. If you use Pro, update both plugins and purge full-page caches so dynamic counters use the new markup.

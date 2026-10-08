@@ -11,6 +11,16 @@ if ( ! defined( 'ABSPATH' ) )
 class Post_Views_Counter_Emails_Query {
 
 	/**
+	 * Most ISO weeks a filtered day range may touch and still be proven complete.
+	 * Six cover any range of up to 31 days
+	 * however it falls; the built-in cadences touch one week per range. A longer
+	 * range is read without week checks and is unestablished.
+	 *
+	 * @var int
+	 */
+	const MAX_CHECKED_WEEKS = 6;
+
+	/**
 	 * @var Post_Views_Counter
 	 */
 	private $pvc;
@@ -206,9 +216,17 @@ class Post_Views_Counter_Emails_Query {
 			$previous_views = $this->query_previous_views_map( $period['comparison_start_period'], $period['comparison_end_period'], $query_args['post_types'], wp_list_pluck( $top_items, 'post_id' ) );
 
 		$overview_trend = $this->build_trend_data( $current['total_views'], $previous['total_views'] );
+
+		// a comparison with a range that cannot be shown complete is not a trend
+		if ( ! $current['complete'] || ! $previous['complete'] ) {
+			$overview_trend = $this->build_trend_data( $current['total_views'], 0 );
+			$overview_trend['views_change'] = (int) $current['total_views'] - (int) $previous['total_views'];
+		}
+
 		$threshold_met = (int) $current['total_views'] >= (int) $query_args['threshold'];
 		$should_send = $threshold_met || $query_args['send_empty_reports'];
-		$top_content = $this->build_top_content_data( $top_items, $previous_views );
+		$unestablished = [];
+		$top_content = $this->build_top_content_data( $top_items, $previous_views, $unestablished );
 
 		$overview = [
 			'total_views'			=> (int) $current['total_views'],
@@ -234,7 +252,7 @@ class Post_Views_Counter_Emails_Query {
 			],
 			'overview'		=> $overview,
 			'top_content'	=> $top_content,
-			'traffic_signals' => $this->build_traffic_signals_data( $overview, $top_content ),
+			'traffic_signals' => $this->build_traffic_signals_data( $overview, $top_content, $unestablished ),
 			'status'		=> $this->build_status_data( $overview, ! empty( $top_content ) )
 		];
 	}
@@ -298,15 +316,42 @@ class Post_Views_Counter_Emails_Query {
 		global $wpdb;
 
 		$post_type_placeholders = implode( ', ', array_fill( 0, count( $post_types ), '%s' ) );
-		$period_query = $this->get_period_query_parts( $start_period, $end_period );
-		$params = array_merge( [ 0 ], $period_query['params'], [ 'publish', '' ], $post_types );
+		$source = $this->get_range_source( $start_period, $end_period );
+
+		if ( $source !== null && $source['type'] === 0 ) {
+			$query = $wpdb->prepare(
+				' SELECT COALESCE( SUM( summary.period_views ), 0 ) AS total_views, COALESCE( SUM( CASE WHEN summary.period_views > 0 THEN 1 ELSE 0 END ), 0 ) AS viewed_content_count, COALESCE( SUM( summary.incomplete ), 0 ) AS incomplete_count
+				FROM (
+					SELECT pv.id AS post_id, SUM( CASE WHEN pv.type = 0 AND pv.period >= %s AND pv.period <= %s THEN pv.count ELSE 0 END ) AS period_views, CASE WHEN ' . $source['checks'] . ' THEN 0 ELSE 1 END AS incomplete
+					FROM ' . $wpdb->prefix . 'post_views AS pv
+					INNER JOIN ' . $wpdb->posts . ' AS p ON pv.id = p.ID
+					WHERE ' . $source['where'] . $this->get_post_content_clause() . '
+						AND p.post_status = %s
+						AND p.post_password = %s
+						AND p.post_type IN (' . $post_type_placeholders . ')
+					GROUP BY pv.id
+				) AS summary',
+				array_merge( [ $source['from'], $source['to'] ], $source['check_params'], $source['where_params'], [ 'publish', '' ], $post_types )
+			);
+
+			$row = $wpdb->get_row( $query, ARRAY_A );
+
+			return [
+				'total_views'			=> isset( $row['total_views'] ) ? (int) $row['total_views'] : 0,
+				'viewed_content_count'	=> isset( $row['viewed_content_count'] ) ? (int) $row['viewed_content_count'] : 0,
+				'complete'				=> $source['checks'] !== '1 = 0' && isset( $row['incomplete_count'] ) && (int) $row['incomplete_count'] === 0
+			];
+		}
+
+		$period_query = $source === null ? $this->get_period_query_parts( $start_period, $end_period ) : [ 'clause' => 'pv.period = %s', 'params' => [ $source['period'] ] ];
+		$params = array_merge( [ $source === null ? 0 : $source['type'] ], $period_query['params'], [ 'publish', '' ], $post_types );
 		$query = $wpdb->prepare(
 			' SELECT COALESCE( SUM( summary.period_views ), 0 ) AS total_views, COUNT( summary.post_id ) AS viewed_content_count
 			FROM (
 				SELECT pv.id AS post_id, SUM( pv.count ) AS period_views
 				FROM ' . $wpdb->prefix . 'post_views AS pv
 				INNER JOIN ' . $wpdb->posts . ' AS p ON pv.id = p.ID
-				WHERE pv.type = %d
+				WHERE pv.type = %d' . $this->get_post_content_clause() . '
 					AND ' . $period_query['clause'] . '
 					AND p.post_status = %s
 					AND p.post_password = %s
@@ -320,7 +365,8 @@ class Post_Views_Counter_Emails_Query {
 
 		return [
 			'total_views'			=> isset( $row['total_views'] ) ? (int) $row['total_views'] : 0,
-			'viewed_content_count'	=> isset( $row['viewed_content_count'] ) ? (int) $row['viewed_content_count'] : 0
+			'viewed_content_count'	=> isset( $row['viewed_content_count'] ) ? (int) $row['viewed_content_count'] : 0,
+			'complete'				=> true
 		];
 	}
 
@@ -338,13 +384,36 @@ class Post_Views_Counter_Emails_Query {
 		global $wpdb;
 
 		$post_type_placeholders = implode( ', ', array_fill( 0, count( $post_types ), '%s' ) );
-		$period_query = $this->get_period_query_parts( $start_period, $end_period );
-		$params = array_merge( [ 0 ], $period_query['params'], [ 'publish', '' ], $post_types, [ (int) $limit ] );
+		$source = $this->get_range_source( $start_period, $end_period );
+
+		if ( $source !== null && $source['type'] === 0 ) {
+			$query = $wpdb->prepare(
+				' SELECT pv.id AS post_id, p.post_title AS post_title, SUM( CASE WHEN pv.type = 0 AND pv.period >= %s AND pv.period <= %s THEN pv.count ELSE 0 END ) AS current_views, CASE WHEN ' . $source['checks'] . ' THEN 1 ELSE 0 END AS complete
+				FROM ' . $wpdb->prefix . 'post_views AS pv
+				INNER JOIN ' . $wpdb->posts . ' AS p ON pv.id = p.ID
+				WHERE ' . $source['where'] . $this->get_post_content_clause() . '
+					AND p.post_status = %s
+					AND p.post_password = %s
+					AND p.post_type IN (' . $post_type_placeholders . ')
+				GROUP BY pv.id, p.post_title
+				HAVING current_views > 0
+				ORDER BY current_views DESC, pv.id ASC
+				LIMIT %d',
+				array_merge( [ $source['from'], $source['to'] ], $source['check_params'], $source['where_params'], [ 'publish', '' ], $post_types, [ (int) $limit ] )
+			);
+
+			$items = $wpdb->get_results( $query, ARRAY_A );
+
+			return is_array( $items ) ? $items : [];
+		}
+
+		$period_query = $source === null ? $this->get_period_query_parts( $start_period, $end_period ) : [ 'clause' => 'pv.period = %s', 'params' => [ $source['period'] ] ];
+		$params = array_merge( [ $source === null ? 0 : $source['type'] ], $period_query['params'], [ 'publish', '' ], $post_types, [ (int) $limit ] );
 		$query = $wpdb->prepare(
 			' SELECT pv.id AS post_id, p.post_title AS post_title, SUM( pv.count ) AS current_views
 			FROM ' . $wpdb->prefix . 'post_views AS pv
 			INNER JOIN ' . $wpdb->posts . ' AS p ON pv.id = p.ID
-			WHERE pv.type = %d
+			WHERE pv.type = %d' . $this->get_post_content_clause() . '
 				AND ' . $period_query['clause'] . '
 				AND p.post_status = %s
 				AND p.post_password = %s
@@ -380,13 +449,45 @@ class Post_Views_Counter_Emails_Query {
 
 		$post_type_placeholders = implode( ', ', array_fill( 0, count( $post_types ), '%s' ) );
 		$post_id_placeholders = implode( ', ', array_fill( 0, count( $post_ids ), '%d' ) );
-		$period_query = $this->get_period_query_parts( $start_period, $end_period );
-		$params = array_merge( [ 0 ], $period_query['params'], [ 'publish', '' ], $post_types, $post_ids );
+		$source = $this->get_range_source( $start_period, $end_period );
+
+		// a range that is not a whole stored period counts only for posts whose ISO weeks add up
+		if ( $source !== null && $source['type'] === 0 ) {
+			$query = $wpdb->prepare(
+				' SELECT pv.id AS post_id, SUM( CASE WHEN pv.type = 0 AND pv.period >= %s AND pv.period <= %s THEN pv.count ELSE 0 END ) AS previous_views, CASE WHEN ' . $source['checks'] . ' THEN 1 ELSE 0 END AS complete
+				FROM ' . $wpdb->prefix . 'post_views AS pv
+				INNER JOIN ' . $wpdb->posts . ' AS p ON pv.id = p.ID
+				WHERE ' . $source['where'] . $this->get_post_content_clause() . '
+					AND p.post_status = %s
+					AND p.post_password = %s
+					AND p.post_type IN (' . $post_type_placeholders . ')
+					AND pv.id IN (' . $post_id_placeholders . ')
+				GROUP BY pv.id',
+				array_merge( [ $source['from'], $source['to'] ], $source['check_params'], $source['where_params'], [ 'publish', '' ], $post_types, $post_ids )
+			);
+
+			$results = $wpdb->get_results( $query, ARRAY_A );
+			$views = [];
+
+			if ( is_array( $results ) ) {
+				foreach ( $results as $result ) {
+					if ( empty( $result['complete'] ) )
+						$views[(int) $result['post_id']] = null;
+					elseif ( (int) $result['previous_views'] > 0 )
+						$views[(int) $result['post_id']] = (int) $result['previous_views'];
+				}
+			}
+
+			return $views;
+		}
+
+		$period_query = $source === null ? $this->get_period_query_parts( $start_period, $end_period ) : [ 'clause' => 'pv.period = %s', 'params' => [ $source['period'] ] ];
+		$params = array_merge( [ $source === null ? 0 : $source['type'] ], $period_query['params'], [ 'publish', '' ], $post_types, $post_ids );
 		$query = $wpdb->prepare(
 			' SELECT pv.id AS post_id, SUM( pv.count ) AS previous_views
 			FROM ' . $wpdb->prefix . 'post_views AS pv
 			INNER JOIN ' . $wpdb->posts . ' AS p ON pv.id = p.ID
-			WHERE pv.type = %d
+			WHERE pv.type = %d' . $this->get_post_content_clause() . '
 				AND ' . $period_query['clause'] . '
 				AND p.post_status = %s
 				AND p.post_password = %s
@@ -406,6 +507,89 @@ class Post_Views_Counter_Emails_Query {
 		}
 
 		return $views;
+	}
+
+	/**
+	 * Restrict the counter rows to posts when the table stores other content.
+	 *
+	 * @return string
+	 */
+	private function get_post_content_clause() {
+		return pvc_post_views_has_content_column() ? ' AND pv.content = 0' : '';
+	}
+
+	/**
+	 * Get where the Views of a date range are read from.
+	 *
+	 * A range that is exactly one ISO week or one calendar month is read from
+	 * that period's own row, which the daily cleanup never deletes. Any other
+	 * range is read from daily rows, and counts only while the daily rows of
+	 * every ISO week it touches add up to that week's own row, checked in the same statement.
+	 *
+	 * @param string|int $start_period Ymd
+	 * @param string|int $end_period   Ymd
+	 * @return array|null Own row: [ 'type' => 1|2, 'period' ]. Daily rows:
+	 *                    [ 'type' => 0, 'from', 'to', 'where', 'where_params',
+	 *                    'checks', 'check_params' ]. Null when the bounds are not
+	 *                    dates, which keeps the released clause.
+	 */
+	private function get_range_source( $start_period, $end_period ) {
+		$start = $this->normalize_date_period_value( $start_period );
+		$end = $this->normalize_date_period_value( $end_period );
+
+		if ( $start === '' || $end === '' )
+			return null;
+
+		if ( $start > $end ) {
+			$temp = $start;
+			$start = $end;
+			$end = $temp;
+		}
+
+		$utc = new DateTimeZone( 'UTC' );
+		$from = DateTimeImmutable::createFromFormat( '!Ymd', $start, $utc );
+		$to = DateTimeImmutable::createFromFormat( '!Ymd', $end, $utc );
+
+		if ( ! $from || ! $to || $from->format( 'Ymd' ) !== $start || $to->format( 'Ymd' ) !== $end )
+			return null;
+
+		if ( $from->format( 'N' ) === '1' && $to->format( 'Ymd' ) === $from->modify( '+6 days' )->format( 'Ymd' ) )
+			return [ 'type' => 1, 'period' => $from->format( 'oW' ) ];
+
+		if ( $from->format( 'j' ) === '1' && $to->format( 'Ymd' ) === $from->format( 'Ymt' ) )
+			return [ 'type' => 2, 'period' => $from->format( 'Ym' ) ];
+
+		$monday = $from->modify( '-' . ( (int) $from->format( 'N' ) - 1 ) . ' days' );
+		$last_sunday = $to->modify( '+' . ( 7 - (int) $to->format( 'N' ) ) . ' days' );
+		$weeks = [];
+		$checks = [];
+		$check_params = [];
+
+		for ( $week = $monday; $week <= $last_sunday; $week = $week->modify( '+7 days' ) ) {
+			// Beyond the proof budget, totals remain readable but completeness is unestablished.
+			if ( count( $weeks ) >= self::MAX_CHECKED_WEEKS ) {
+				return [
+					'type' => 0, 'from' => $start, 'to' => $end,
+					'where' => '( pv.type = 0 AND pv.period >= %s AND pv.period <= %s )',
+					'where_params' => [ $start, $end ],
+					'checks' => '1 = 0', 'check_params' => []
+				];
+			}
+
+			$weeks[] = $week->format( 'oW' );
+			$checks[] = 'SUM( CASE WHEN pv.type = 0 AND pv.period >= %s AND pv.period <= %s THEN pv.count ELSE 0 END ) = SUM( CASE WHEN pv.type = 1 AND pv.period = %s THEN pv.count ELSE 0 END )';
+			$check_params = array_merge( $check_params, [ $week->format( 'Ymd' ), $week->modify( '+6 days' )->format( 'Ymd' ), $week->format( 'oW' ) ] );
+		}
+
+		return [
+			'type'			=> 0,
+			'from'			=> $start,
+			'to'			=> $end,
+			'where'			=> '( ( pv.type = 0 AND pv.period >= %s AND pv.period <= %s ) OR ( pv.type = 1 AND pv.period IN (' . implode( ', ', array_fill( 0, count( $weeks ), '%s' ) ) . ') ) )',
+			'where_params'	=> array_merge( [ $monday->format( 'Ymd' ), $last_sunday->format( 'Ymd' ) ], $weeks ),
+			'checks'		=> implode( ' AND ', $checks ),
+			'check_params'	=> $check_params
+		];
 	}
 
 	/**
@@ -463,14 +647,21 @@ class Post_Views_Counter_Emails_Query {
 	 * @param array $previous_views
 	 * @return array
 	 */
-	private function build_top_content_data( $top_items, $previous_views ) {
+	private function build_top_content_data( $top_items, $previous_views, &$unestablished = [] ) {
 		$content = [];
 
 		foreach ( $top_items as $item ) {
 			$post_id = (int) $item['post_id'];
 			$current_views = (int) $item['current_views'];
 			$item_previous_views = isset( $previous_views[$post_id] ) ? (int) $previous_views[$post_id] : 0;
-			$trend = $this->build_trend_data( $current_views, $item_previous_views );
+			$established = ( ! isset( $item['complete'] ) || ! empty( $item['complete'] ) ) && ! ( array_key_exists( $post_id, $previous_views ) && $previous_views[$post_id] === null );
+			$trend = $this->build_trend_data( $current_views, $established ? $item_previous_views : 0 );
+
+			// an item whose ranges cannot be shown complete has no trend and no signal
+			if ( ! $established ) {
+				$trend['views_change'] = $current_views - $item_previous_views;
+				$unestablished[] = $post_id;
+			}
 			$url = get_permalink( $post_id );
 
 			$content[] = [
@@ -528,9 +719,10 @@ class Post_Views_Counter_Emails_Query {
 	 *
 	 * @param array $overview
 	 * @param array $top_content
+	 * @param array $unestablished Post IDs whose ranges cannot be shown complete
 	 * @return array
 	 */
-	private function build_traffic_signals_data( $overview, $top_content ) {
+	private function build_traffic_signals_data( $overview, $top_content, $unestablished = [] ) {
 		if ( (int) $overview['total_views'] === 0 ) {
 			return [
 				'state'			=> 'silence',
@@ -548,6 +740,9 @@ class Post_Views_Counter_Emails_Query {
 		}
 
 		foreach ( $top_content as $item ) {
+			if ( ! empty( $item['post_id'] ) && in_array( (int) $item['post_id'], $unestablished, true ) )
+				continue;
+
 			$current_views = isset( $item['current_views'] ) ? (int) $item['current_views'] : 0;
 			$previous_views = isset( $item['previous_views'] ) ? (int) $item['previous_views'] : 0;
 

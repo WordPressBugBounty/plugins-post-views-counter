@@ -680,7 +680,7 @@ class Post_Views_Counter_Settings {
 
 			// add parameters
 			$pages['post-views-counter']['type'] = 'page';
-			$pages['post-views-counter']['icon'] = 'dashicons-chart-bar';
+			$pages['post-views-counter']['icon'] = $pvc->functions->get_menu_icon_data_uri();
 			$pages['post-views-counter']['position'] = '99.301';
 
 			// add subpages
@@ -937,11 +937,7 @@ class Post_Views_Counter_Settings {
 		} elseif ( isset( $_POST['post_views_counter_reset_views'] ) ) {
 			// make sure we do not change anything in the settings
 			$input = $pvc->options['other'];
-
-			if ( $wpdb->query( 'TRUNCATE TABLE ' . $wpdb->prefix . 'post_views' ) )
-				add_settings_error( 'reset_post_views', 'reset_post_views', __( 'All existing data deleted successfully.', 'post-views-counter' ), 'updated' );
-			else
-				add_settings_error( 'reset_post_views', 'reset_post_views', __( 'Error occurred. All existing data were not deleted.', 'post-views-counter' ), 'error' );
+			$this->reset_views_data();
 		// save general settings
 		} elseif ( isset( $_POST['save_post_views_counter_settings_general'] ) ) {
 			$input['update_version'] = $pvc->options['general']['update_version'];
@@ -987,6 +983,92 @@ class Post_Views_Counter_Settings {
 		}
 
 		return $input;
+	}
+
+	/**
+	 * Delete shared counter data under a Visit-state write fence.
+	 *
+	 * @return void
+	 */
+	private function reset_views_data() {
+		global $wpdb;
+
+		$pvc = Post_Views_Counter();
+		$visits = $pvc->visits instanceof Post_Views_Counter_Visits ? $pvc->visits : null;
+
+		if ( function_exists( 'Post_Views_Counter_Pro' ) ) {
+			$pro = Post_Views_Counter_Pro();
+			$pro_counter = isset( $pro->counter ) ? $pro->counter : null;
+
+			if ( ! is_object( $pro_counter ) || ! method_exists( $pro_counter, 'supports_queue_generation' ) || ! $pro_counter->supports_queue_generation() ) {
+					add_settings_error( 'reset_post_views', 'reset_post_views', __( 'Queued counts cannot be retired safely. Update or deactivate Post Views Counter Pro before retrying.', 'post-views-counter' ), 'error' );
+				return;
+			}
+		}
+
+		$reset_locked = $visits === null || $visits->begin_measurement_fence();
+
+		if ( ! $reset_locked ) {
+			add_settings_error( 'reset_post_views', 'reset_post_views', __( 'Error occurred. All existing data were not deleted.', 'post-views-counter' ), 'error' );
+			return;
+		}
+
+		$timestamp = time();
+		$entry = [ 'code' => 'completed', 'raw' => null ];
+		$completion = [ 'code' => 'completed', 'raw' => null ];
+		$result = 'failed';
+		$fence_result = [ 'unlocked' => false, 'flushed' => false ];
+
+		try {
+			if ( $visits !== null ) {
+				$entry = $visits->enter_visit_reset_v0( $timestamp );
+
+				if ( $entry['code'] !== 'completed' ) {
+					$result = 'entry_failed';
+				} else {
+					// The descriptor is inert while fenced and is drained exactly once by
+					// the checked outermost unlock.
+					$visits->defer_measurement_fence_work( [ 'type' => 'state_caches', 'retire_reads' => true ] );
+				}
+			}
+
+			if ( $result !== 'entry_failed' && $wpdb->query( 'TRUNCATE TABLE ' . $wpdb->prefix . 'post_views' ) === false )
+				$result = 'truncate_failed';
+
+			if ( $result === 'failed' && $visits !== null ) {
+				$completion = $visits->complete_visit_reset_v0( $entry['raw'], $timestamp );
+				$result = $completion['code'] === 'completed' ? 'completed' : 'completion_failed';
+			} elseif ( $result === 'failed' )
+				$result = 'completed';
+		} finally {
+			if ( $visits !== null )
+				$fence_result = $visits->end_measurement_fence();
+		}
+
+		if ( $visits !== null && ( empty( $fence_result['unlocked'] ) || empty( $fence_result['flushed'] ) ) )
+			$result = 'retirement_failed';
+
+		// The failed unlock deliberately retains the SQL fence. Do not invoke a
+		// translated admin notice (or any post-fence publication) until recovery
+		// can release it; the version-zero state remains the durable failure signal.
+		if ( $visits !== null && $visits->is_measurement_fence_active() ) {
+			error_log( 'Post Views Counter: measurement reset could not release its protected table fence.' );
+			return;
+		}
+
+		if ( $visits !== null && $result !== 'entry_failed' && $result !== 'retirement_failed' ) {
+			$promotion_raw = $result === 'completed' ? $completion['raw'] : $entry['raw'];
+
+			if ( ! is_string( $promotion_raw ) || ! $visits->promote_visit_reset_v0( $promotion_raw ) )
+				$result = 'promotion_failed';
+		}
+
+		if ( $result === 'completed' )
+			add_settings_error( 'reset_post_views', 'reset_post_views', __( 'All existing data deleted successfully.', 'post-views-counter' ), 'updated' );
+		elseif ( $result === 'entry_failed' )
+			add_settings_error( 'reset_post_views', 'reset_post_views', __( 'Visits state could not be reset safely, so no data was deleted.', 'post-views-counter' ), 'error' );
+		else
+			add_settings_error( 'reset_post_views', 'reset_post_views', __( 'Error occurred. All existing data were not deleted.', 'post-views-counter' ), 'error' );
 	}
 
 	/**

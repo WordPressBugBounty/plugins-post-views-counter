@@ -22,12 +22,17 @@ class Post_Views_Counter_Admin {
 	}
 
 	/**
-	 * Register Chart.js.
+	 * Register Chart.js and the shared metric button component.
+	 *
+	 * Core owns the metric button runtime so dashboard charts, the column modal,
+	 * and extension charts draw the same control. Consumers load the registered
+	 * handle when available and keep a local fallback for older Core versions.
 	 *
 	 * @return void
 	 */
 	public function register_chartjs() {
-		wp_register_script( 'pvc-chartjs', POST_VIEWS_COUNTER_URL . '/assets/chartjs/chart.min.js', [ 'jquery' ], '4.5.0', true );
+		wp_register_script( 'pvc-chartjs', POST_VIEWS_COUNTER_URL . '/assets/chartjs/chart.min.js', [ 'jquery' ], '4.5.1', true );
+		wp_register_script( 'pvc-metric-toggle', POST_VIEWS_COUNTER_URL . '/js/metric-toggle.js', [], Post_Views_Counter()->defaults['version'], true );
 	}
 
 	/**
@@ -46,7 +51,7 @@ class Post_Views_Counter_Admin {
 	 * @return void
 	 */
 	public function block_editor_rest_api_init() {
-		// get views route
+		// update counter totals route
 		register_rest_route(
 			'post-views-counter',
 			'/update-post-views/',
@@ -56,7 +61,16 @@ class Post_Views_Counter_Admin {
 				'permission_callback'	=> [ $this, 'check_rest_route_permissions' ],
 				'args'					=> [
 					'id' => [
-						'sanitize_callback'	=> 'absint',
+						'required'			=> true,
+						'validate_callback'	=> [ $this, 'validate_post_id_param' ],
+						'sanitize_callback'	=> 'absint'
+					],
+					'views' => [
+						'validate_callback'	=> [ $this, 'validate_counter_total_param' ]
+					],
+					// released alias of views
+					'post_views' => [
+						'validate_callback'	=> [ $this, 'validate_counter_total_param' ]
 					]
 				]
 			]
@@ -64,75 +78,114 @@ class Post_Views_Counter_Admin {
 	}
 
 	/**
-	 * Check whether user has permissions to perform post views update in block editor.
+	 * Validate the post ID before absint() can turn a malformed value such
+	 * as -20, 20.7 or 20junk into another existing post ID.
 	 *
-	 * @param object $request WP_REST_Request
+	 * @param mixed           $value Submitted value.
+	 * @param WP_REST_Request $request Request.
+	 * @param string          $param Parameter name.
+	 * @return true|WP_Error
+	 */
+	public function validate_post_id_param( $value, $request, $param ) {
+		// a positive integer, as an int or a canonical decimal string
+		if ( ( is_int( $value ) || is_string( $value ) ) && filter_var( $value, FILTER_VALIDATE_INT, [ 'options' => [ 'min_range' => 1 ] ] ) !== false && ( is_int( $value ) || ctype_digit( $value ) ) )
+			return true;
+
+		/* translators: %s: request parameter name */
+		return new WP_Error( 'rest_invalid_param', sprintf( __( '%s must be a positive whole number.', 'post-views-counter' ), $param ), [ 'status' => 400 ] );
+	}
+
+	/**
+	 * Validate one submitted counter total: a whole number, or blank.
+	 *
+	 * @param mixed           $value Submitted value.
+	 * @param WP_REST_Request $request Request.
+	 * @param string          $param Parameter name.
+	 * @return true|WP_Error
+	 */
+	public function validate_counter_total_param( $value, $request, $param ) {
+		if ( is_null( $value ) || is_int( $value ) )
+			return true;
+
+		if ( is_string( $value ) && ( trim( $value ) === '' || preg_match( '/^-?\d+$/', trim( $value ) ) ) )
+			return true;
+
+		/* translators: %s: request parameter name */
+		return new WP_Error( 'rest_invalid_param', sprintf( __( '%s must be a whole number.', 'post-views-counter' ), $param ), [ 'status' => 400 ] );
+	}
+
+	/**
+	 * Check whether the current user may update this post's counter totals
+	 * from the block editor.
+	 *
+	 * @param WP_REST_Request $request Request.
 	 * @return bool|WP_Error
 	 */
 	public function check_rest_route_permissions( $request ) {
-		// break if current user can't edit this post
-		if ( ! current_user_can( 'edit_post', (int) $request->get_param( 'id' ) ) )
-			return new WP_Error( 'pvc-user-not-allowed', __( 'You are not allowed to edit this item.', 'post-views-counter' ) );
+		$post_id = (int) $request->get_param( 'id' );
+		$columns = Post_Views_Counter()->columns;
 
-		// break if views editing is restricted
-		if ( (bool) Post_Views_Counter()->options['display']['restrict_edit_views'] === true && ! current_user_can( apply_filters( 'pvc_restrict_edit_capability', 'manage_options' ) ) )
-			return new WP_Error( 'pvc-user-not-allowed', __( 'You are not allowed to edit this item.', 'post-views-counter' ) );
+		// checked first so the route does not reveal which posts exist
+		if ( ! current_user_can( 'edit_post', $post_id ) )
+			return new WP_Error( 'pvc-user-not-allowed', __( 'You are not allowed to edit this item.', 'post-views-counter' ), [ 'status' => rest_authorization_required_code() ] );
+
+		if ( ! $columns || ! $columns->is_post_counter_visible_in_editor( $post_id ) )
+			return new WP_Error( 'pvc-invalid-post', __( 'Invalid post ID.', 'post-views-counter' ), [ 'status' => 404 ] );
+
+		if ( ! $columns->can_edit_post_counter_in_editor( $post_id ) )
+			return new WP_Error( 'pvc-user-not-allowed', __( 'You are not allowed to edit this item.', 'post-views-counter' ), [ 'status' => rest_authorization_required_code() ] );
 
 		return true;
 	}
 
 	/**
-	 * REST API callback for block editor endpoint.
+	 * REST API callback for the block editor endpoint.
 	 *
-	 * @param array $data
-	 * @return string|int
+	 * Only an edited Views total is written. The shared writer re-checks
+	 * eligibility.
+	 *
+	 * @param WP_REST_Request $request Request.
+	 * @return WP_REST_Response|WP_Error
 	 */
-	public function block_editor_update_callback( $data ) {
-		// get main instance
-		$pvc = Post_Views_Counter();
+	public function block_editor_update_callback( $request ) {
+		$columns = Post_Views_Counter()->columns;
 
-		// cast post ID
-		$post_id = ! empty( $data['id'] ) ? (int) $data['id'] : 0;
+		if ( ! $columns )
+			return new WP_Error( 'pvc-counter-write-failed', __( 'The counter totals could not be saved.', 'post-views-counter' ), [ 'status' => 500 ] );
 
-		// cast post views
-		$post_views = ! empty( $data['post_views'] ) ? (int) $data['post_views'] : 0;
+		$views = $request->get_param( 'views' );
 
-		// get countable post types
-		$post_types = (array) $pvc->options['general']['post_types_count'];
+		// released clients send the Views total as post_views
+		if ( is_null( $views ) )
+			$views = $request->get_param( 'post_views' );
 
-		// check if post exists
-		$post = get_post( $post_id );
+		// a blank value never means zero
+		if ( is_null( $views ) || trim( (string) $views ) === '' )
+			return new WP_Error( 'pvc-no-counter-totals', __( 'No counter totals were submitted.', 'post-views-counter' ), [ 'status' => 400 ] );
 
-		// whether to count this post type or not
-		if ( empty( $post_types ) || empty( $post ) || ! in_array( $post->post_type, $post_types, true ) )
-			return wp_send_json_error( __( 'Invalid post ID.', 'post-views-counter' ) );
+		$post_id = (int) $request->get_param( 'id' );
+		$state = $columns->apply_editor_counter_totals( $post_id, [ 'post_views' => (string) $views ] );
 
-		// break if current user can't edit this post
-		if ( ! current_user_can( 'edit_post', $post_id ) )
-			return wp_send_json_error( __( 'You are not allowed to edit this item.', 'post-views-counter' ) );
+		if ( is_wp_error( $state ) )
+			return $state;
 
-		// break if views editing is restricted
-		if ( (bool) $pvc->options['display']['restrict_edit_views'] === true && ! current_user_can( apply_filters( 'pvc_restrict_edit_capability', 'manage_options' ) ) )
-			return wp_send_json_error( __( 'You are not allowed to edit this item.', 'post-views-counter' ) );
-
-		// update post views
-		pvc_update_post_views( $post_id, $post_views );
-
-		do_action( 'pvc_after_update_post_views_count', $post_id );
-
-		return $post_id;
+		return rest_ensure_response(
+			[
+				'id'	=> $post_id,
+				'views'	=> $state['views']
+			]
+		);
 	}
 
 	/**
 	 * Enqueue frontend and editor JavaScript and CSS.
 	 *
 	 * @global string $pagenow
-	 * @global string $wp_version
 	 *
 	 * @return void
 	 */
 	public function block_editor_enqueue_scripts() {
-		global $pagenow, $wp_version;
+		global $pagenow;
 
 		// get main instance
 		$pvc = Post_Views_Counter();
@@ -142,43 +195,37 @@ class Post_Views_Counter_Admin {
 		if ( $pagenow === 'widgets.php' || $pagenow === 'customize.php' || $pagenow === 'site-editor.php' )
 			return;
 
+		// enqueue frontend and editor block styles
+		wp_enqueue_style( 'pvc-block-editor', POST_VIEWS_COUNTER_URL . '/css/block-editor.css', '', $pvc->defaults['version'] );
+
+		$id = (int) get_the_ID();
+
+		// untracked post types and posts hidden by the display filters get no counter rows
+		if ( ! $id || ! $pvc->columns || ! $pvc->columns->is_post_counter_visible_in_editor( $id ) )
+			return;
+
+		$state = $pvc->columns->get_post_editor_counter_state( $id );
+
 		// enqueue the bundled block JS file
-		// wp-editor: PluginPostStatusInfo, wp-api-request: wp.apiRequest used on save
-		wp_enqueue_script( 'pvc-block-editor', POST_VIEWS_COUNTER_URL . '/js/block-editor.js', [ 'wp-element', 'wp-components', 'wp-editor', 'wp-data', 'wp-plugins', 'wp-api-request' ], $pvc->defaults['version'], false );
-
-		// restrict editing
-		$can_edit = false;
-		
-		$restrict = (bool) $pvc->options['display']['restrict_edit_views'];
-		
-		if ( $restrict === false || ( $restrict === true && current_user_can( apply_filters( 'pvc_restrict_edit_capability', 'manage_options' ) ) ) )
-			$can_edit = true;
-		
-		// get total post views
-		$id =  get_the_ID();
-		$count = pvc_get_post_views( $id );
-
-		// disable views display and editing?
-		if ( apply_filters( 'pvc_admin_display_views', true, $id ) === false ) {
-			$count = '—';
-			$can_edit = false;
-		}
+		// wp-edit-post: PluginPostStatusInfo, wp-api-fetch: counter totals request after save
+		wp_enqueue_script( 'pvc-block-editor', POST_VIEWS_COUNTER_URL . '/js/block-editor.js', [ 'wp-element', 'wp-components', 'wp-editor', 'wp-edit-post', 'wp-data', 'wp-plugins', 'wp-api-fetch' ], $pvc->defaults['version'], false );
 
 		// prepare script data
 		$script_data = [
-			'postID'		=> $id,
-			'postViews'		=> $count,
-			'canEdit'		=> $can_edit,
-			'nonce'			=> wp_create_nonce( 'wp_rest' ),
-			'wpGreater53'	=> version_compare( $wp_version, '5.3', '>=' ),
-			'textPostViews'	=> esc_html__( 'Post Views', 'post-views-counter' ),
-			'textHelp'		=> esc_html__( 'Adjust the views count for this post.', 'post-views-counter' ),
-			'textCancel'	=> esc_html__( 'Cancel', 'post-views-counter' )
+			'postID'			=> $id,
+			'views'				=> $state['views'],
+			'canEdit'			=> $state['editable'],
+			'locale'			=> str_replace( '_', '-', get_user_locale() ),
+			'i18n'				=> [
+				'views'				=> __( 'Views', 'post-views-counter' ),
+				/* translators: 1: metric name, 2: formatted count */
+				'valueLabel'		=> __( '%1$s: %2$s.', 'post-views-counter' ),
+				'help'				=> __( 'Lifetime totals. Changing them does not alter daily, weekly, monthly, or yearly history.', 'post-views-counter' ),
+				'cancel'			=> __( 'Cancel', 'post-views-counter' ),
+				'saveFailed'		=> __( 'Views could not be saved.', 'post-views-counter' )
+			]
 		];
 
 		wp_add_inline_script( 'pvc-block-editor', 'var pvcEditorArgs = ' . wp_json_encode( $script_data ) . ";\n", 'before' );
-
-		// enqueue frontend and editor block styles
-		wp_enqueue_style( 'pvc-block-editor', POST_VIEWS_COUNTER_URL . '/css/block-editor.css', '', $pvc->defaults['version'] );
 	}
 }

@@ -741,6 +741,10 @@ class Post_Views_Counter_Settings_API {
 					'action'	=> ! empty( $condition['action'] ) ? sanitize_key( $condition['action'] ) : '',
 					'target'	=> ! empty( $condition['target'] ) ? sanitize_text_field( $condition['target'] ) : '',
 					'container'	=> ! empty( $condition['container'] ) ? sanitize_text_field( $condition['container'] ) : '',
+					// Opt-in only: a conditionally disabled checkbox or radio target is
+					// cleared before it is disabled. Ordinary disabled controls keep
+					// their value.
+					'clear_on_disable' => ! empty( $condition['clear_on_disable'] ),
 				];
 			}
 
@@ -1053,7 +1057,7 @@ class Post_Views_Counter_Settings_API {
 				break;
 		}
 
-		return stripslashes_deep( $value );
+		return $value;
 	}
 
 	/**

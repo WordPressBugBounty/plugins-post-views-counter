@@ -61,7 +61,10 @@ class Post_Views_Counter_Emails_Mailer {
 			return $send_lock;
 
 		try {
-			$this->maybe_flush_pending_counts( $context );
+			$flush_result = $this->maybe_flush_pending_counts( $context );
+
+			if ( is_wp_error( $flush_result ) )
+				return $this->finalize_failure( $this->get_default_result( $context['recipient'], [], [] ), 'pending_counts_not_flushed', $flush_result, $context['settings'], $context['period'], $context['source'], $context['is_test'], $context['summary_type'] );
 
 			$rendered = $this->emails->render_summary(
 				$context['summary_type'],
@@ -289,19 +292,24 @@ class Post_Views_Counter_Emails_Mailer {
 	 * flush addon-owned cache groups before summary query generation.
 	 *
 	 * @param array $context
-	 * @return void
+	 * @return true|WP_Error
 	 */
 	private function maybe_flush_pending_counts( $context ) {
 		if ( ! $this->should_flush_pending_counts( $context ) )
-			return;
+			return true;
 
 		$counter = isset( $this->pvc->counter ) ? $this->pvc->counter : null;
 		$should_flush_base_counts = (bool) apply_filters( 'pvc_email_summary_should_flush_pending_counts', true, $context, $this );
 
-		if ( $should_flush_base_counts && $counter && method_exists( $counter, 'using_object_cache' ) && method_exists( $counter, 'flush_cache_to_db' ) && $counter->using_object_cache() )
-			$counter->flush_cache_to_db();
+		if ( $should_flush_base_counts && $counter && method_exists( $counter, 'flush_cache_to_db' ) && ! $counter->flush_cache_to_db() ) {
+			$status = method_exists( $counter, 'get_cache_flush_status' ) ? sanitize_key( $counter->get_cache_flush_status() ) : 'failed';
+
+			return new WP_Error( 'pvc_email_pending_counts_' . $status, __( 'Pending view counts could not be flushed before the summary query.', 'post-views-counter' ) );
+		}
 
 		do_action( 'pvc_email_summary_before_query', $context, $this );
+
+		return true;
 	}
 
 	/**
