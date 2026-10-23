@@ -2,7 +2,7 @@
 /*
 Plugin Name: Post Views Counter
 Description: Count and display post views, track site-wide visits, and see what content works – inside WordPress. Fast, easy to use and privacy-first.
-Version: 1.8.0
+Version: 1.8.1
 Author: dFactory
 Author URI: https://dfactory.co/
 Plugin URI: https://postviewscounter.com/
@@ -32,7 +32,7 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 	 * Post Views Counter final class.
 	 *
 	 * @class Post_Views_Counter
-	 * @version	1.8.0
+	 * @version	1.8.1
 	 */
 	final class Post_Views_Counter {
 
@@ -147,7 +147,7 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 				],
 				'schedule_version'		=> 1
 			],
-			'version'	=> '1.8.0'
+			'version'	=> '1.8.1'
 		];
 
 		// instances
@@ -953,6 +953,7 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 		 */
 		public function activation( $network ) {
 			$activation_failed = false;
+			$failure_reason = '';
 
 			// network activation?
 			if ( is_multisite() && $network ) {
@@ -971,7 +972,7 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 					try {
 						// Keep network activation on its existing work profile. The bounded
 						// network cursor adds and verifies Visits after activation returns.
-							$activation_failed = ! $this->activate_site_internal( false, true );
+							$activation_failed = ! $this->activate_site_internal( false, true, $failure_reason );
 						} finally {
 							restore_current_blog();
 						}
@@ -980,21 +981,67 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 							break;
 					}
 
-				if ( $this->visits instanceof Post_Views_Counter_Visits )
+				if ( ! $activation_failed && $this->visits instanceof Post_Views_Counter_Visits )
 					$this->visits->schedule_schema_sweep();
 
 			} else
-				$activation_failed = ! $this->activate_site_internal( true, true );
+				$activation_failed = ! $this->activate_site_internal( true, true, $failure_reason );
 
-			if ( $activation_failed )
-				wp_die( esc_html__( 'Post Views Counter could not safely recover data from a previous destructive deactivation. Retry activation after checking the database.', 'post-views-counter' ) );
+			if ( $activation_failed ) {
+				wp_die( esc_html( $this->get_activation_failure_message( $failure_reason ) ) );
+			}
+		}
+
+		/**
+		 * Log bounded recovery diagnostics while the failing site is still current.
+		 *
+		 * @param string $reason Privacy-safe failure code.
+		 * @param bool   $explicit Whether plugin activation was explicitly requested.
+		 * @return void
+		 */
+		private function log_site_activation_failure( $reason, $explicit ) {
+			$state = $this->visits instanceof Post_Views_Counter_Visits ? $this->visits->get_state() : [];
+			$schema_status = isset( $state['schema']['last_status'] ) ? $state['schema']['last_status'] : 'unknown';
+
+			if ( ! in_array( $schema_status, [ 'not_checked', 'checking', 'ready', 'table_missing', 'column_missing', 'column_add_failed', 'column_incompatible', 'schema_probe_failed' ], true ) )
+				$schema_status = 'unknown';
+
+			error_log( sprintf( 'Post Views Counter: %s (reason=%s; schema=%s; site=%d).', $explicit ? 'activation blocked' : 'site initialization incomplete', sanitize_key( $reason ), $schema_status, get_current_blog_id() ) );
+		}
+
+		/**
+		 * Explain blocked activation without exposing database errors or saved state.
+		 *
+		 * @param string $reason Privacy-safe failure code.
+		 * @return string
+		 */
+		private function get_activation_failure_message( $reason ) {
+			switch ( $reason ) {
+				case 'schema_lock_unavailable':
+					return __( 'Post Views Counter could not obtain its database migration lock. Wait for other plugin operations to finish and check the server error log before activating again.', 'post-views-counter' );
+				case 'state_format_unsupported':
+					return __( 'Post Views Counter could not recognize its saved recovery state. Leave the statistics table and plugin options unchanged and contact support.', 'post-views-counter' );
+				case 'state_read_failed':
+					return __( 'Post Views Counter could not read its saved recovery state. Check database access and the server error log before activating again.', 'post-views-counter' );
+				case 'existing_statistics_protected':
+					return __( 'Post Views Counter found existing statistics alongside a previous data-deletion marker and stopped activation to protect them. Leave the statistics table and plugin options unchanged and contact support.', 'post-views-counter' );
+				case 'schema_migration_failed':
+					return __( 'Post Views Counter could not prepare its Visits database column. Check the table structure, database permissions and server error log before activating again.', 'post-views-counter' );
+				case 'table_creation_failed':
+					return __( 'Post Views Counter could not create its statistics table. Check database permissions and the server error log before activating again.', 'post-views-counter' );
+				case 'recovery_table_probe_failed':
+				case 'recovery_table_cleanup_failed':
+				case 'recovery_table_verification_failed':
+					return __( 'Post Views Counter could not verify an empty statistics table for recovery. Leave the statistics table and plugin options unchanged and check the server error log.', 'post-views-counter' );
+				default:
+					return __( 'Post Views Counter could not safely complete its saved-state recovery. Leave the statistics table and plugin options unchanged and check the server error log.', 'post-views-counter' );
+			}
 		}
 
 		/**
 		 * Single site activation.
 		 *
 		 * @global object $wpdb
-		 * @global string $charset_collate
 		 *
 		 * @return void
 		 */
@@ -1006,35 +1053,59 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 		 * Activate one site with internal migration control.
 		 *
 		 * @global object $wpdb
-		 * @global string $charset_collate
 		 *
-		 * @param bool $migrate_visits Whether to add and verify the Visits schema now.
-		 * @param bool $explicit Whether explicit activation may clear a tombstone.
+		 * @param bool   $migrate_visits Whether to add and verify the Visits schema now.
+		 * @param bool   $explicit Whether explicit activation may clear a tombstone.
+		 * @param string $failure_reason Receives a privacy-safe failure code.
 		 * @return bool
 		 */
-		private function activate_site_internal( $migrate_visits, $explicit = false ) {
-			global $wpdb, $charset_collate;
-			$activation_state = $this->visits instanceof Post_Views_Counter_Visits ? $this->visits->prepare_site_activation( $explicit ) : 'normal';
-
-			if ( $activation_state === false )
-				return false;
+		private function activate_site_internal( $migrate_visits, $explicit = false, &$failure_reason = null ) {
+			global $wpdb;
+			$charset_collate = $wpdb->get_charset_collate();
+			$failure_reason = '';
+			$activation_state = false;
 
 			try {
+				$activation_state = $this->visits instanceof Post_Views_Counter_Visits ? $this->visits->prepare_site_activation( $explicit, $failure_reason ) : 'normal';
+
+				if ( $activation_state === false )
+					return false;
+
 				if ( $activation_state === 'tombstone' ) {
 					$table = $wpdb->prefix . 'post_views';
 					$wpdb->last_error = '';
-					$dropped = $wpdb->query( 'DROP TABLE IF EXISTS ' . $table );
-					$remaining = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table ) );
+					$exists = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) );
 
-					if ( $dropped === false || $wpdb->last_error !== '' || $remaining !== null )
+					if ( $wpdb->last_error !== '' ) {
+						$failure_reason = 'recovery_table_probe_failed';
 						return false;
+					}
+
+					if ( $exists !== null ) {
+						$has_rows = $wpdb->get_var( 'SELECT 1 FROM `' . $table . '` LIMIT 1' );
+
+						if ( $wpdb->last_error !== '' ) {
+							$failure_reason = 'recovery_table_probe_failed';
+							return false;
+						}
+
+						if ( $has_rows !== null ) {
+							$failure_reason = 'existing_statistics_protected';
+							return false;
+						}
+
+						$dropped = $wpdb->query( 'DROP TABLE IF EXISTS ' . $table );
+						$remaining = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) );
+
+						if ( $dropped === false || $wpdb->last_error !== '' || $remaining !== null ) {
+							$failure_reason = 'recovery_table_cleanup_failed';
+							return false;
+						}
+					}
 				}
 
-				// required for dbdelta
-				require_once( ABSPATH . 'wp-admin/includes/upgrade.php' );
-
-				// create post views table
-				dbDelta( '
+				// Only create missing tables here; additive migration owns existing columns.
+				$created = $wpdb->query( '
 				CREATE TABLE IF NOT EXISTS ' . $wpdb->prefix . 'post_views (
 					`id` bigint unsigned NOT NULL,
 					`type` tinyint(1) unsigned NOT NULL,
@@ -1047,17 +1118,41 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 				) ' . $charset_collate . ';'
 				);
 
+				if ( $created === false ) {
+					$failure_reason = 'table_creation_failed';
+					return false;
+				}
+
 				if ( $activation_state === 'tombstone' ) {
 					$wpdb->last_error = '';
 					$row_count = $wpdb->get_var( 'SELECT COUNT(*) FROM ' . $wpdb->prefix . 'post_views' );
 
-					if ( $wpdb->last_error !== '' || (int) $row_count !== 0 || ! $this->visits->complete_site_activation() )
+					if ( $wpdb->last_error !== '' || $row_count === null ) {
+						$failure_reason = 'recovery_table_verification_failed';
 						return false;
+					}
+
+					if ( (int) $row_count !== 0 ) {
+						$failure_reason = 'existing_statistics_protected';
+						return false;
+					}
+
+					if ( ! $this->visits->complete_site_activation() ) {
+						$failure_reason = 'state_recovery_failed';
+						return false;
+					}
 				}
 
 				// Verify the additive Visits schema for single-site activation and
 				// newly initialized sites. Network activation defers this work.
 				$visits_ready = ! $migrate_visits || ( $this->visits instanceof Post_Views_Counter_Visits && $this->visits->migrate_schema( true ) );
+
+				if ( ! $visits_ready ) {
+					$failure_reason = 'schema_migration_failed';
+
+					if ( $explicit )
+						return false;
+				}
 
 				// add default options
 				add_option( 'post_views_counter_settings_general', $this->defaults['general'], null, false );
@@ -1077,7 +1172,11 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 
 				return $visits_ready;
 			} finally {
-				if ( $this->visits instanceof Post_Views_Counter_Visits )
+				if ( $failure_reason !== '' )
+					$this->log_site_activation_failure( $failure_reason, $explicit );
+
+				// Only successful preparation transfers a lease to this caller.
+				if ( $activation_state !== false && $this->visits instanceof Post_Views_Counter_Visits )
 					$this->visits->finish_site_activation();
 			}
 		}
@@ -1269,8 +1368,7 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 
 				try {
 					// run current site activation process
-					if ( ! $this->activate_site_internal( true, false ) )
-						error_log( 'Post Views Counter: new-site initialization remained fail-closed.' );
+					$this->activate_site_internal( true, false );
 				} finally {
 					restore_current_blog();
 				}

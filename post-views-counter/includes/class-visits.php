@@ -455,7 +455,12 @@ class Post_Views_Counter_Visits {
 		if ( $column_probe['status'] === 'found' )
 			return $this->verify_and_mark_ready( $state, $column_probe['column'] ) ? 'ready' : 'failed';
 
-		$lock_token = $this->acquire_schema_lock();
+		$reuse_lease = $this->lifecycle_schema_lock_token !== false;
+
+		if ( $reuse_lease && ! $this->owns_schema_lock( $this->lifecycle_schema_lock_token ) )
+			return 'unknown';
+
+		$lock_token = $reuse_lease ? $this->lifecycle_schema_lock_token : $this->acquire_schema_lock();
 
 		if ( $lock_token === false )
 			return 'unknown';
@@ -499,6 +504,9 @@ class Post_Views_Counter_Visits {
 			if ( $ddl_state === false || ! $this->is_current_normal_state_raw( $ddl_state['value'] ) || $this->is_deactivation_tombstone_raw( $ddl_state['value'] ) )
 				return 'unknown';
 
+			if ( ! $this->owns_schema_lock( $lock_token ) )
+				return 'unknown';
+
 			$this->add_visits_column( $table );
 
 			// A concurrent upgrader may have added the column even if this query failed.
@@ -516,7 +524,9 @@ class Post_Views_Counter_Visits {
 
 			return $this->verify_and_mark_ready( $state, $column_probe['column'] ) ? 'ready' : 'failed';
 		} finally {
-			$this->release_schema_lock( $lock_token );
+			// The lifecycle owner keeps its fence through the remaining activation work.
+			if ( ! $reuse_lease )
+				$this->release_schema_lock( $lock_token );
 		}
 	}
 
@@ -934,10 +944,12 @@ class Post_Views_Counter_Visits {
 	/**
 	 * Return whether activation is allowed to initialize/replace current state.
 	 *
-	 * @param bool $explicit Whether this is explicit plugin activation.
+	 * @param bool   $explicit Whether this is explicit plugin activation.
+	 * @param string $failure_reason Receives a privacy-safe failure code.
 	 * @return string|false normal, tombstone, or false.
 	 */
-	public function prepare_site_activation( $explicit ) {
+	public function prepare_site_activation( $explicit, &$failure_reason = null ) {
+		$failure_reason = 'schema_lock_unavailable';
 		$lock_token = $this->acquire_schema_lock();
 
 		if ( $lock_token === false )
@@ -950,6 +962,7 @@ class Post_Views_Counter_Visits {
 			$repair = $this->repair_cache_state( $durable );
 
 			if ( ! $repair['success'] ) {
+				$failure_reason = $repair['reason'];
 				$this->finish_site_state_deletion();
 				return false;
 			}
@@ -957,20 +970,30 @@ class Post_Views_Counter_Visits {
 			$durable = $repair['record'];
 		}
 
-		if ( $durable === false || ( $durable['exists'] && ! $this->is_current_normal_state_raw( $durable['value'] ) && ! $this->is_deactivation_tombstone_raw( $durable['value'] ) ) ) {
+		if ( $durable === false ) {
+			$failure_reason = 'state_read_failed';
+			$this->finish_site_state_deletion();
+			return false;
+		}
+
+		if ( $durable['exists'] && ! $this->is_current_normal_state_raw( $durable['value'] ) && ! $this->is_deactivation_tombstone_raw( $durable['value'] ) ) {
+			$failure_reason = 'state_format_unsupported';
 			$this->finish_site_state_deletion();
 			return false;
 		}
 
 		if ( $this->is_deactivation_tombstone_raw( $durable['value'] ) ) {
 			if ( ! $explicit ) {
+				$failure_reason = 'explicit_activation_required';
 				$this->finish_site_state_deletion();
 				return false;
 			}
 
+			$failure_reason = '';
 			return 'tombstone';
 		}
 
+		$failure_reason = '';
 		return 'normal';
 	}
 
@@ -980,7 +1003,9 @@ class Post_Views_Counter_Visits {
 	}
 
 	/**
-	 * Clear only an exact tombstone after an empty table has been verified.
+	 * Replace an exact tombstone without resetting its retired queue generation.
+	 * The caller must verify empty-table recovery or explicitly authorize retaining
+	 * existing statistics under the lifecycle lease.
 	 *
 	 * @return bool
 	 */
@@ -1297,6 +1322,7 @@ class Post_Views_Counter_Visits {
 		if ( $initial === false ) {
 			$state = $this->get_state();
 			$state['persistence_success'] = false;
+			$state['persistence_reason'] = 'state_read_failed';
 			return $state;
 		}
 
@@ -1306,6 +1332,7 @@ class Post_Views_Counter_Visits {
 			if ( ! $repair['success'] ) {
 				$state = $this->make_cache_repair_unavailable( $repair['state'] );
 				$state['persistence_success'] = false;
+				$state['persistence_reason'] = $repair['reason'];
 				return $state;
 			}
 
@@ -1400,8 +1427,10 @@ class Post_Views_Counter_Visits {
 		$result = $this->mutate_state( $reconcile, true, true, false );
 		$state = $result['state'];
 
-		if ( ! $result['success'] )
+		if ( ! $result['success'] ) {
 			$state['persistence_success'] = false;
+			$state['persistence_reason'] = $result['reason'];
+		}
 
 		return $state;
 	}
@@ -1812,7 +1841,7 @@ class Post_Views_Counter_Visits {
 
 	/**
 	 * Return the cached shared-table content-column shape. A null result means
-	 * the probe failed and callers must retain the views-only SQL shape.
+	 * the probe failed; callers must not assume the discriminator is absent.
 	 *
 	 * @return bool|null
 	 */
@@ -1824,10 +1853,17 @@ class Post_Views_Counter_Visits {
 		if ( is_bool( $state['schema']['content_column'] ) )
 			return $state['schema']['content_column'];
 
-		$probe = null;
-		$result = $this->mutate_state(
-			function( $latest ) use ( $wpdb, &$probe ) {
-				$probe = $this->probe_named_column( $wpdb->prefix . 'post_views', 'content' );
+		// Table metadata is independent of publishing its memoized state. A failed
+		// cache repair must not turn a verified legacy shape into invalid SQL.
+		$probe = $this->probe_named_column( $wpdb->prefix . 'post_views', 'content' );
+
+		if ( $probe === null )
+			return null;
+
+		$this->mutate_state(
+			function( $latest, $record, $attempt ) use ( $wpdb, &$probe ) {
+				if ( $attempt > 0 )
+					$probe = $this->probe_named_column( $wpdb->prefix . 'post_views', 'content' );
 
 				if ( $probe !== null )
 					$latest['schema']['content_column'] = $probe;
@@ -1837,7 +1873,7 @@ class Post_Views_Counter_Visits {
 			true
 		);
 
-		return $result['success'] && $probe !== null ? $probe : null;
+		return $probe;
 	}
 
 	/**
@@ -1867,6 +1903,8 @@ class Post_Views_Counter_Visits {
 	public function add_plugin_status_rows( $rows, $settings = null ) {
 		$state = $this->refresh_availability();
 		$status = $this->get_visits_availability();
+		$data_accessible = $this->is_site_data_accessible();
+		$access_reason = $data_accessible ? 'ready' : ( isset( $state['persistence_reason'] ) ? $state['persistence_reason'] : $state['reason'] );
 
 		$rows[] = [
 			'label' => __( 'Visits Readiness', 'post-views-counter' ),
@@ -1881,7 +1919,8 @@ class Post_Views_Counter_Visits {
 					(int) $state['schema']['last_attempt_at'] > 0 ? gmdate( 'c', (int) $state['schema']['last_attempt_at'] ) : __( 'never', 'post-views-counter' ),
 					(int) $state['last_compatibility_check'] > 0 ? gmdate( 'c', (int) $state['last_compatibility_check'] ) : __( 'never', 'post-views-counter' )
 				),
-				sprintf( /* translators: 1: Core version, 2: extension version */ __( 'Versions: Core %1$s; Pro %2$s', 'post-views-counter' ), $state['versions']['core'] !== '' ? $state['versions']['core'] : __( 'unknown', 'post-views-counter' ), $state['versions']['pro'] !== '' ? $state['versions']['pro'] : __( 'inactive', 'post-views-counter' ) )
+				sprintf( /* translators: 1: Core version, 2: extension version */ __( 'Versions: Core %1$s; Pro %2$s', 'post-views-counter' ), $state['versions']['core'] !== '' ? $state['versions']['core'] : __( 'unknown', 'post-views-counter' ), $state['versions']['pro'] !== '' ? $state['versions']['pro'] : __( 'inactive', 'post-views-counter' ) ),
+				sprintf( /* translators: 1: Views data access, 2: reason code */ __( 'Views access: %1$s (%2$s)', 'post-views-counter' ), $data_accessible ? __( 'ready', 'post-views-counter' ) : __( 'blocked', 'post-views-counter' ), $access_reason )
 			]
 		];
 
@@ -2532,6 +2571,23 @@ class Post_Views_Counter_Visits {
 	}
 
 	/**
+	 * Verify current, unexpired ownership without trusting the Options cache.
+	 *
+	 * @param string $token Expected owner token.
+	 * @return bool
+	 */
+	private function owns_schema_lock( $token ) {
+		$record = $this->read_option_durable( self::LOCK_OPTION_NAME );
+		$current = $record === false ? null : $record['value'];
+
+		return is_array( $current )
+			&& isset( $current['token'], $current['expires_at'] )
+			&& is_string( $current['token'] )
+			&& (int) $current['expires_at'] > $this->now()
+			&& hash_equals( $current['token'], $token );
+	}
+
+	/**
 	 * Return whether another request's durable schema lease still blocks a
 	 * deactivation-tombstone retry.
 	 *
@@ -2857,7 +2913,17 @@ class Post_Views_Counter_Visits {
 			}
 
 			foreach ( [ 'notoptions', 'alloptions' ] as $cache_key ) {
-				if ( ! wp_cache_delete( $cache_key, 'options' ) && wp_cache_get( $cache_key, 'options' ) !== false )
+				$bucket = wp_cache_get( $cache_key, 'options' );
+
+				// Unrelated options cannot shadow this non-autoloaded state. Keep
+				// their cache intact and require eviction only for a relevant entry.
+				if ( $bucket === false || ( is_array( $bucket ) && ! array_key_exists( self::OPTION_NAME, $bucket ) ) )
+					continue;
+
+				wp_cache_delete( $cache_key, 'options' );
+				$bucket = wp_cache_get( $cache_key, 'options' );
+
+				if ( $bucket !== false && ( ! is_array( $bucket ) || array_key_exists( self::OPTION_NAME, $bucket ) ) )
 					continue 2;
 			}
 

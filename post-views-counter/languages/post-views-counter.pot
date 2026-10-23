@@ -2,14 +2,14 @@
 # This file is distributed under the MIT License.
 msgid ""
 msgstr ""
-"Project-Id-Version: Post Views Counter 1.8.0\n"
+"Project-Id-Version: Post Views Counter 1.8.1\n"
 "Report-Msgid-Bugs-To: https://wordpress.org/support/plugin/post-views-counter\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"POT-Creation-Date: 2026-10-07T18:29:06+00:00\n"
+"POT-Creation-Date: 2026-10-23T09:39:30+00:00\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "X-Generator: WP-CLI 2.12.0\n"
 "X-Domain: post-views-counter\n"
@@ -1737,8 +1737,8 @@ msgstr ""
 #. translators: 1: read state, 2: reason code
 #. translators: 1: live write state, 2: reason code
 #: class-settings-general.php:453
-#: class-visits.php:1874
-#: class-visits.php:1875
+#: class-visits.php:1912
+#: class-visits.php:1913
 msgid "unavailable"
 msgstr ""
 
@@ -1916,7 +1916,7 @@ msgstr ""
 
 #. translators: 1: Core version, 2: extension version
 #: class-settings-other.php:371
-#: class-visits.php:1884
+#: class-visits.php:1922
 msgid "unknown"
 msgstr ""
 
@@ -2166,66 +2166,79 @@ msgstr ""
 msgid "Thank you! Datebase was successfully updated."
 msgstr ""
 
-#: class-visits.php:1872
+#: class-visits.php:1910
 msgid "Visits Readiness"
 msgstr ""
 
 #. translators: 1: read state, 2: reason code
-#: class-visits.php:1874
+#: class-visits.php:1912
 #, php-format
 msgid "Read: %1$s (%2$s)"
 msgstr ""
 
 #. translators: 1: read state, 2: reason code
 #. translators: 1: live write state, 2: reason code
-#: class-visits.php:1874
-#: class-visits.php:1875
+#. translators: 1: Views data access, 2: reason code
+#: class-visits.php:1912
+#: class-visits.php:1913
+#: class-visits.php:1923
 msgid "ready"
 msgstr ""
 
 #. translators: 1: live write state, 2: reason code
-#: class-visits.php:1875
+#: class-visits.php:1913
 #, php-format
 msgid "Live write: %1$s (%2$s)"
 msgstr ""
 
 #. translators: 1: schema state, 2: schema status code
-#: class-visits.php:1876
+#: class-visits.php:1914
 #, php-format
 msgid "Schema: %1$s (%2$s)"
 msgstr ""
 
 #. translators: derived metrics start timestamp or none
-#: class-visits.php:1877
+#: class-visits.php:1915
 #, php-format
 msgid "Derived metrics since: %s"
 msgstr ""
 
 #. translators: derived metrics start timestamp or none
-#: class-visits.php:1877
+#: class-visits.php:1915
 msgid "none"
 msgstr ""
 
 #. translators: 1: last migration attempt timestamp or never, 2: last compatibility check timestamp or never
-#: class-visits.php:1880
+#: class-visits.php:1918
 #, php-format
 msgid "Checks: migration attempt %1$s; compatibility %2$s"
 msgstr ""
 
-#: class-visits.php:1881
-#: class-visits.php:1882
+#: class-visits.php:1919
+#: class-visits.php:1920
 msgid "never"
 msgstr ""
 
 #. translators: 1: Core version, 2: extension version
-#: class-visits.php:1884
+#: class-visits.php:1922
 #, php-format
 msgid "Versions: Core %1$s; Pro %2$s"
 msgstr ""
 
 #. translators: 1: Core version, 2: extension version
-#: class-visits.php:1884
+#: class-visits.php:1922
 msgid "inactive"
+msgstr ""
+
+#. translators: 1: Views data access, 2: reason code
+#: class-visits.php:1923
+#, php-format
+msgid "Views access: %1$s (%2$s)"
+msgstr ""
+
+#. translators: 1: Views data access, 2: reason code
+#: class-visits.php:1923
+msgid "blocked"
 msgstr ""
 
 #: class-widgets.php:55
@@ -2341,7 +2354,7 @@ msgstr ""
 #: blocks/post-views/index.js:1
 #: src/blocks/most-viewed-posts/edit.js:40
 #: src/blocks/post-views/edit.js:14
-#: post-views-counter.php:1500
+#: post-views-counter.php:1598
 msgid "Settings"
 msgstr ""
 
@@ -2649,26 +2662,54 @@ msgstr ""
 msgid "I already did"
 msgstr ""
 
-#: post-views-counter.php:990
-msgid "Post Views Counter could not safely recover data from a previous destructive deactivation. Retry activation after checking the database."
+#: post-views-counter.php:1021
+msgid "Post Views Counter could not obtain its database migration lock. Wait for other plugin operations to finish and check the server error log before activating again."
 msgstr ""
 
-#: post-views-counter.php:1327
+#: post-views-counter.php:1023
+msgid "Post Views Counter could not recognize its saved recovery state. Leave the statistics table and plugin options unchanged and contact support."
+msgstr ""
+
+#: post-views-counter.php:1025
+msgid "Post Views Counter could not read its saved recovery state. Check database access and the server error log before activating again."
+msgstr ""
+
+#: post-views-counter.php:1027
+msgid "Post Views Counter found existing statistics alongside a previous data-deletion marker and stopped activation to protect them. Leave the statistics table and plugin options unchanged and contact support."
+msgstr ""
+
+#: post-views-counter.php:1029
+msgid "Post Views Counter could not prepare its Visits database column. Check the table structure, database permissions and server error log before activating again."
+msgstr ""
+
+#: post-views-counter.php:1031
+msgid "Post Views Counter could not create its statistics table. Check database permissions and the server error log before activating again."
+msgstr ""
+
+#: post-views-counter.php:1035
+msgid "Post Views Counter could not verify an empty statistics table for recovery. Leave the statistics table and plugin options unchanged and check the server error log."
+msgstr ""
+
+#: post-views-counter.php:1037
+msgid "Post Views Counter could not safely complete its saved-state recovery. Leave the statistics table and plugin options unchanged and check the server error log."
+msgstr ""
+
+#: post-views-counter.php:1425
 msgid "Are you sure you want to reset these settings to defaults?"
 msgstr ""
 
-#: post-views-counter.php:1328
+#: post-views-counter.php:1426
 msgid "Are you sure you want to delete all existing data?"
 msgstr ""
 
-#: post-views-counter.php:1329
+#: post-views-counter.php:1427
 msgid "Are you sure you want to import views now?"
 msgstr ""
 
-#: post-views-counter.php:1331
+#: post-views-counter.php:1429
 msgid "The test email request did not return a valid response."
 msgstr ""
 
-#: post-views-counter.php:1332
+#: post-views-counter.php:1430
 msgid "The test email request could not be completed. Please try again."
 msgstr ""

@@ -4,7 +4,7 @@ Tags: counter, postviews, statistics, analytics, pageviews
 Requires at least: 6.4
 Requires PHP: 7.4
 Tested up to: 7.1
-Stable tag: 1.8.0
+Stable tag: 1.8.1
 License: MIT
 License URI: http://opensource.org/licenses/MIT
 
@@ -123,6 +123,12 @@ If you’ve purchased Post Views Counter Pro, your license includes one year of 
 2. screenshot-2.png
 
 == Changelog ==
+
+= 1.8.1 =
+* Fix: Activate the plugin over existing statistics without losing stored Views.
+* Fix: Protect existing statistics marked for deletion by a previous deactivation and clarify activation errors.
+* Fix: Preserve Views access during Visits cache recovery and improve Plugin Status diagnostics.
+* Fix: Restore frontend counter alignment in themes with centered content layouts.
 
 = 1.8.0 =
 * New: Site-wide Visits tracking.
@@ -551,5 +557,5 @@ Initial release
 
 == Upgrade Notice ==
 
-= 1.8.0 =
-Adds site-wide Visits, dashboard comparisons and Custom Format for the Views counter, with counting and editing fixes. If you use Pro, update both plugins and purge full-page caches so dynamic counters use the new markup.
+= 1.8.1 =
+Fixes activation with existing statistics, Views access during Visits cache recovery, and frontend counter alignment.
