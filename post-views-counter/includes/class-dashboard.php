@@ -562,23 +562,24 @@ class Post_Views_Counter_Dashboard {
 		$values = wp_cache_get( $cache_key, Post_Views_Counter_Visits_Query::VISITS_CACHE_GROUP );
 
 		if ( $values === false ) {
-			$wpdb->last_error = '';
-			$rows = $wpdb->get_results( $query, ARRAY_A );
+			// a failed read, silent or not, is unavailable, never a measured
+			// zero or the previous query's rows
+			$read = Post_Views_Counter_Visits_Query::run_read( $query );
 
-			// a failed read is unavailable, never a measured zero
-			if ( $wpdb->last_error !== '' )
+			if ( ! $read['success'] )
 				return array_merge( $empty, [ 'reason' => 'database_error' ] );
 
 			$values = [];
 
-			foreach ( (array) $rows as $row ) {
+			foreach ( $read['rows'] as $row ) {
 				if ( ! isset( $row['post_type'], $row['period'] ) )
 					continue;
 
 				$values[(string) $row['post_type']][(string) $row['period']] = isset( $row['post_visits'] ) ? (int) $row['post_visits'] : 0;
 			}
 
-			wp_cache_add( $cache_key, $values, Post_Views_Counter_Visits_Query::VISITS_CACHE_GROUP, absint( apply_filters( 'pvc_object_cache_expire', 300 ) ) );
+			if ( $read['cacheable'] )
+				wp_cache_add( $cache_key, $values, Post_Views_Counter_Visits_Query::VISITS_CACHE_GROUP, absint( apply_filters( 'pvc_object_cache_expire', 300 ) ) );
 		}
 
 		return [ 'available' => true, 'reason' => 'ready', 'periods' => $buckets['periods'], 'values' => $values ];
@@ -765,6 +766,11 @@ class Post_Views_Counter_Dashboard {
 		// whether every dimension reads the query Core built
 		$core_chart = true;
 
+		// whether the paired Visit read can share every dimension's Views scope
+		$visits_scope_shared = true;
+		$visits_scope_grain = null;
+		$visits_scope_lang = null;
+
 		$views_datasets[] = [
 			'label'				=> __( 'Total Views', 'post-views-counter' ),
 			'metric'			=> 'views',
@@ -824,13 +830,30 @@ class Post_Views_Counter_Dashboard {
 				if ( $query_args !== $core_query_args )
 					$core_chart = false;
 
-				// every dimension reads the same grain, so the paired Visit read
-				// follows whatever the filter settled on
-				if ( isset( $query_args['views_query'] ) && is_array( $query_args['views_query'] ) )
-					$visits_views_query = $query_args['views_query'];
+				// The paired Visit read follows a grain and a language shared by
+				// every dimension. Any other change, or a grain or language that
+				// differs between dimensions, scopes Views in a way the Visit
+				// read cannot, so Visits are unavailable rather than mismatched.
+				if ( ! is_array( $query_args ) || array_diff_key( $query_args, [ 'views_query' => true, 'lang' => true ] ) != array_diff_key( $core_query_args, [ 'views_query' => true, 'lang' => true ] ) )
+					$visits_scope_shared = false;
+				elseif ( isset( $query_args['views_query'] ) && is_array( $query_args['views_query'] ) ) {
+					if ( $visits_scope_grain !== null && $visits_scope_grain !== $query_args['views_query'] )
+						$visits_scope_shared = false;
 
-				if ( isset( $query_args['lang'] ) )
-					$args['lang'] = $query_args['lang'];
+					$visits_scope_grain = $query_args['views_query'];
+					$visits_views_query = $query_args['views_query'];
+				} else
+					$visits_scope_shared = false;
+
+				$lang = is_array( $query_args ) && isset( $query_args['lang'] ) ? $query_args['lang'] : '';
+
+				if ( $visits_scope_lang !== null && $visits_scope_lang !== $lang )
+					$visits_scope_shared = false;
+
+				$visits_scope_lang = $lang;
+
+				if ( $lang !== '' )
+					$args['lang'] = $lang;
 
 				// get month views
 				$post_type_data[$id] = array_values( pvc_get_views( $query_args ) );
@@ -854,12 +877,15 @@ class Post_Views_Counter_Dashboard {
 
 		// One bounded, cached read covers every dimension and the total, so the
 		// paired payload never costs one extra Visit query per dimension.
-		$visit_series = $this->get_paired_visit_series( [
-			'post_types'	=> array_values( $post_types ),
-			'views_query'	=> $visits_views_query,
-			'period'		=> $period,
-			'lang'			=> isset( $args['lang'] ) ? $args['lang'] : ''
-		] );
+		if ( $visits_scope_shared )
+			$visit_series = $this->get_paired_visit_series( [
+				'post_types'	=> array_values( $post_types ),
+				'views_query'	=> $visits_views_query,
+				'period'		=> $period,
+				'lang'			=> isset( $args['lang'] ) ? $args['lang'] : ''
+			] );
+		else
+			$visit_series = [ 'available' => false, 'reason' => 'scope_mismatch', 'periods' => [], 'values' => [] ];
 
 		$visits_available = ! empty( $visit_series['available'] );
 		$visits_sum = $visits_available ? $this->get_visit_series_values( $visit_series ) : [];

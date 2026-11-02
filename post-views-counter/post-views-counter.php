@@ -2,7 +2,7 @@
 /*
 Plugin Name: Post Views Counter
 Description: Count and display post views, track site-wide visits, and see what content works – inside WordPress. Fast, easy to use and privacy-first.
-Version: 1.8.1
+Version: 1.8.2
 Author: dFactory
 Author URI: https://dfactory.co/
 Plugin URI: https://postviewscounter.com/
@@ -32,7 +32,7 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 	 * Post Views Counter final class.
 	 *
 	 * @class Post_Views_Counter
-	 * @version	1.8.1
+	 * @version	1.8.2
 	 */
 	final class Post_Views_Counter {
 
@@ -147,7 +147,7 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 				],
 				'schedule_version'		=> 1
 			],
-			'version'	=> '1.8.1'
+			'version'	=> '1.8.2'
 		];
 
 		// instances
@@ -290,6 +290,10 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 			include_once( POST_VIEWS_COUNTER_PATH . 'includes/class-emails-mailer.php' );
 			include_once( POST_VIEWS_COUNTER_PATH . 'includes/class-emails-scheduler.php' );
 			include_once( POST_VIEWS_COUNTER_PATH . 'includes/class-settings-other.php' );
+			include_once( POST_VIEWS_COUNTER_PATH . 'includes/class-status-facts.php' );
+			include_once( POST_VIEWS_COUNTER_PATH . 'includes/class-status-report.php' );
+			include_once( POST_VIEWS_COUNTER_PATH . 'includes/class-status-delivery.php' );
+			include_once( POST_VIEWS_COUNTER_PATH . 'includes/class-settings-status.php' );
 			include_once( POST_VIEWS_COUNTER_PATH . 'includes/class-import.php' );
 			include_once( POST_VIEWS_COUNTER_PATH . 'includes/class-admin.php' );
 			include_once( POST_VIEWS_COUNTER_PATH . 'includes/class-columns.php' );
@@ -962,8 +966,8 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 				if ( $this->visits instanceof Post_Views_Counter_Visits )
 					$this->visits->reset_network_schema_migration();
 
-				// get all available sites
-				$blogs_ids = $wpdb->get_col( 'SELECT blog_id FROM ' . $wpdb->blogs );
+				// get the sites of this network
+				$blogs_ids = $this->get_current_network_site_ids();
 
 				foreach ( $blogs_ids as $blog_id ) {
 					// change to another site
@@ -1029,8 +1033,8 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 					return __( 'Post Views Counter could not prepare its Visits database column. Check the table structure, database permissions and server error log before activating again.', 'post-views-counter' );
 				case 'table_creation_failed':
 					return __( 'Post Views Counter could not create its statistics table. Check database permissions and the server error log before activating again.', 'post-views-counter' );
-				case 'recovery_table_probe_failed':
-				case 'recovery_table_cleanup_failed':
+				case 'recovery_table_incompatible':
+					return __( 'Post Views Counter found a statistics table whose structure it does not recognize alongside a previous data-deletion marker and stopped activation. Leave the statistics table and plugin options unchanged and contact support.', 'post-views-counter' );
 				case 'recovery_table_verification_failed':
 					return __( 'Post Views Counter could not verify an empty statistics table for recovery. Leave the statistics table and plugin options unchanged and check the server error log.', 'post-views-counter' );
 				default:
@@ -1071,40 +1075,9 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 				if ( $activation_state === false )
 					return false;
 
-				if ( $activation_state === 'tombstone' ) {
-					$table = $wpdb->prefix . 'post_views';
-					$wpdb->last_error = '';
-					$exists = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) );
-
-					if ( $wpdb->last_error !== '' ) {
-						$failure_reason = 'recovery_table_probe_failed';
-						return false;
-					}
-
-					if ( $exists !== null ) {
-						$has_rows = $wpdb->get_var( 'SELECT 1 FROM `' . $table . '` LIMIT 1' );
-
-						if ( $wpdb->last_error !== '' ) {
-							$failure_reason = 'recovery_table_probe_failed';
-							return false;
-						}
-
-						if ( $has_rows !== null ) {
-							$failure_reason = 'existing_statistics_protected';
-							return false;
-						}
-
-						$dropped = $wpdb->query( 'DROP TABLE IF EXISTS ' . $table );
-						$remaining = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) );
-
-						if ( $dropped === false || $wpdb->last_error !== '' || $remaining !== null ) {
-							$failure_reason = 'recovery_table_cleanup_failed';
-							return false;
-						}
-					}
-				}
-
 				// Only create missing tables here; additive migration owns existing columns.
+				// Recovery from a deletion marker never drops a table either: rows stored
+				// after any emptiness check must survive.
 				$created = $wpdb->query( '
 				CREATE TABLE IF NOT EXISTS ' . $wpdb->prefix . 'post_views (
 					`id` bigint unsigned NOT NULL,
@@ -1134,6 +1107,11 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 
 					if ( (int) $row_count !== 0 ) {
 						$failure_reason = 'existing_statistics_protected';
+						return false;
+					}
+
+					if ( ! $this->visits->is_recoverable_table_shape( $wpdb->prefix . 'post_views' ) ) {
+						$failure_reason = 'recovery_table_incompatible';
 						return false;
 					}
 
@@ -1197,6 +1175,22 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 		}
 
 		/**
+		 * Get the IDs of the sites in the current network.
+		 *
+		 * Network activation and deactivation act on the network being operated
+		 * on only; another network sharing the sites table is never touched.
+		 *
+		 * @global object $wpdb
+		 *
+		 * @return array
+		 */
+		private function get_current_network_site_ids() {
+			global $wpdb;
+
+			return $wpdb->get_col( $wpdb->prepare( 'SELECT blog_id FROM ' . $wpdb->blogs . ' WHERE site_id = %d', get_current_network_id() ) );
+		}
+
+		/**
 		 * Plugin deactivation.
 		 *
 		 * @global object $wpdb
@@ -1211,8 +1205,8 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 				global $wpdb;
 				$blocked_deactivation = false;
 
-				// get all available sites
-				$blogs_ids = $wpdb->get_col( 'SELECT blog_id FROM ' . $wpdb->blogs );
+				// get the sites of this network
+				$blogs_ids = $this->get_current_network_site_ids();
 
 				foreach ( $blogs_ids as $blog_id ) {
 					$switched = (int) get_current_blog_id() !== (int) $blog_id;
@@ -1422,6 +1416,10 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 
 				// prepare script data
 				$script_data = [
+					'statusIconLabels' => [
+						'warning' => __( 'Warning', 'post-views-counter' ),
+						'error' => __( 'Critical', 'post-views-counter' )
+					],
 					'resetToDefaults'	=> esc_html__( 'Are you sure you want to reset these settings to defaults?', 'post-views-counter' ),
 					'resetViews'		=> esc_html__( 'Are you sure you want to delete all existing data?', 'post-views-counter' ),
 					'importViews'		=> esc_html__( 'Are you sure you want to import views now?', 'post-views-counter' ),
@@ -1490,13 +1488,16 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 		}
 
 		/**
-		 * Load admin style inline, for menu badge only.
+		 * Load admin menu icon and badge styles inline.
 		 *
 		 * @return void
 		 */
 		public function admin_print_styles() {
 			echo '
 			<style>
+				#adminmenu #toplevel_page_post-views-counter .wp-menu-image {
+					background-size: 18px;
+				}
 				.toplevel_page_post-views-counter .pvc-admin-menu-new,
 				.settings_page_post-views-counter .pvc-admin-menu-new {
 					font-size: 10px;

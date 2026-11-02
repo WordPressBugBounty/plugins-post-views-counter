@@ -51,26 +51,39 @@ class Post_Views_Counter_Admin {
 	 * @return void
 	 */
 	public function block_editor_rest_api_init() {
-		// update counter totals route
+		$id_arg = [
+			'required'			=> true,
+			'validate_callback'	=> [ $this, 'validate_post_id_param' ],
+			'sanitize_callback'	=> 'absint'
+		];
+
+		// counter totals route: POST writes, GET reads the committed total
+		// after a write whose outcome the editor could not confirm
 		register_rest_route(
 			'post-views-counter',
 			'/update-post-views/',
 			[
-				'methods'				=> [ 'POST' ],
-				'callback'				=> [ $this, 'block_editor_update_callback' ],
-				'permission_callback'	=> [ $this, 'check_rest_route_permissions' ],
-				'args'					=> [
-					'id' => [
-						'required'			=> true,
-						'validate_callback'	=> [ $this, 'validate_post_id_param' ],
-						'sanitize_callback'	=> 'absint'
-					],
-					'views' => [
-						'validate_callback'	=> [ $this, 'validate_counter_total_param' ]
-					],
-					// released alias of views
-					'post_views' => [
-						'validate_callback'	=> [ $this, 'validate_counter_total_param' ]
+				[
+					'methods'				=> [ 'POST' ],
+					'callback'				=> [ $this, 'block_editor_update_callback' ],
+					'permission_callback'	=> [ $this, 'check_rest_route_permissions' ],
+					'args'					=> [
+						'id' => $id_arg,
+						'views' => [
+							'validate_callback'	=> [ $this, 'validate_counter_total_param' ]
+						],
+						// released alias of views
+						'post_views' => [
+							'validate_callback'	=> [ $this, 'validate_counter_total_param' ]
+						]
+					]
+				],
+				[
+					'methods'				=> [ 'GET' ],
+					'callback'				=> [ $this, 'block_editor_read_callback' ],
+					'permission_callback'	=> [ $this, 'check_rest_route_permissions' ],
+					'args'					=> [
+						'id' => $id_arg
 					]
 				]
 			]
@@ -104,14 +117,19 @@ class Post_Views_Counter_Admin {
 	 * @return true|WP_Error
 	 */
 	public function validate_counter_total_param( $value, $request, $param ) {
-		if ( is_null( $value ) || is_int( $value ) )
+		if ( is_null( $value ) || ( is_string( $value ) && trim( $value ) === '' ) )
 			return true;
 
-		if ( is_string( $value ) && ( trim( $value ) === '' || preg_match( '/^-?\d+$/', trim( $value ) ) ) )
-			return true;
+		if ( ! is_int( $value ) && ! ( is_string( $value ) && preg_match( '/^-?\d+$/', trim( $value ) ) ) )
+			/* translators: %s: request parameter name */
+			return new WP_Error( 'rest_invalid_param', sprintf( __( '%s must be a whole number.', 'post-views-counter' ), $param ), [ 'status' => 400 ] );
 
-		/* translators: %s: request parameter name */
-		return new WP_Error( 'rest_invalid_param', sprintf( __( '%s must be a whole number.', 'post-views-counter' ), $param ), [ 'status' => 400 ] );
+		// bounded before anything casts it
+		if ( Post_Views_Counter_Columns::parse_counter_total( trim( (string) $value ) ) === null )
+			/* translators: 1: request parameter name, 2: largest accepted total */
+			return new WP_Error( 'rest_invalid_param', sprintf( __( '%1$s must be a whole number no greater than %2$s.', 'post-views-counter' ), $param, Post_Views_Counter_Columns::MAX_COUNTER_TOTAL ), [ 'status' => 400 ] );
+
+		return true;
 	}
 
 	/**
@@ -178,6 +196,33 @@ class Post_Views_Counter_Admin {
 	}
 
 	/**
+	 * REST API callback that reads a post's committed Views total for the
+	 * block editor. It writes nothing.
+	 *
+	 * @param WP_REST_Request $request Request.
+	 * @return WP_REST_Response|WP_Error
+	 */
+	public function block_editor_read_callback( $request ) {
+		$columns = Post_Views_Counter()->columns;
+
+		if ( ! $columns )
+			return new WP_Error( 'pvc-counter-read-failed', __( 'The Views total could not be read.', 'post-views-counter' ), [ 'status' => 500 ] );
+
+		$post_id = (int) $request->get_param( 'id' );
+		$state = $columns->read_editor_counter_totals( $post_id );
+
+		if ( is_wp_error( $state ) )
+			return $state;
+
+		return rest_ensure_response(
+			[
+				'id'	=> $post_id,
+				'views'	=> $state['views']
+			]
+		);
+	}
+
+	/**
 	 * Enqueue frontend and editor JavaScript and CSS.
 	 *
 	 * @global string $pagenow
@@ -222,7 +267,11 @@ class Post_Views_Counter_Admin {
 				'valueLabel'		=> __( '%1$s: %2$s.', 'post-views-counter' ),
 				'help'				=> __( 'Lifetime totals. Changing them does not alter daily, weekly, monthly, or yearly history.', 'post-views-counter' ),
 				'cancel'			=> __( 'Cancel', 'post-views-counter' ),
-				'saveFailed'		=> __( 'Views could not be saved.', 'post-views-counter' )
+				'saveFailed'		=> __( 'Views could not be saved.', 'post-views-counter' ),
+				'saveUncertain'		=> __( 'Views may not have been saved. Check the total before you edit it again.', 'post-views-counter' ),
+				'readFailed'		=> __( 'The Views total could not be read. Reload the page to try again.', 'post-views-counter' ),
+				'unconfirmed'		=> __( 'Unconfirmed', 'post-views-counter' ),
+				'unconfirmedHelp'	=> __( 'The stored total could not be confirmed. A value entered here replaces it after the post is saved and the total is read again.', 'post-views-counter' )
 			]
 		];
 

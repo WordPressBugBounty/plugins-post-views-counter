@@ -3,8 +3,8 @@ Contributors: dfactory
 Tags: counter, postviews, statistics, analytics, pageviews
 Requires at least: 6.4
 Requires PHP: 7.4
-Tested up to: 7.1
-Stable tag: 1.8.1
+Tested up to: 7.2
+Stable tag: 1.8.2
 License: MIT
 License URI: http://opensource.org/licenses/MIT
 
@@ -95,7 +95,7 @@ A View belongs to the content being viewed and is counted according to your coun
 
 = Why do Visits differ from sessions in Google Analytics? =
 
-Post Views Counter follows the counting rules you choose: which content to count, which visitors to include or exclude, and how often to count them again. These rules may differ from your Google Analytics setup, so the totals are not expected to match.
+Post Views Counter follows the counting rules you choose: which content to count, which visitors to include or exclude, and how often to count them again. These rules may differ from your Google Analytics setup, so the totals are not expected to match. Crawlers you exclude are not counted, and analytics tools filter bots their own way. PHP mode cannot count a view when a cached page is served without running WordPress (see the page cache question below).
 
 The time windows also differ. PVC starts a fixed Visit window with the first counted view, using your Count Interval – 24 hours by default. Later views do not extend it. Google Analytics 4 uses an inactivity timeout, which defaults to 30 minutes.
 
@@ -106,6 +106,14 @@ A Visit belongs to your site, not to a post – one Visit often covers several p
 = Why does the Visits chart show no data? =
 
 Visits start accumulating when Visit counting becomes available; earlier Views do not automatically become Visits. Setting Count Interval to 0 stops new Visits but preserves previously counted totals. If browser storage is unavailable, Views can still be counted but Visits are not inferred. Right after an update, the chart can briefly say that Visit data is not available while the database is prepared.
+
+= Which counter mode should I use with a page cache? =
+
+If pages are served from a cache – by a caching plugin, your host or a CDN – use the JavaScript or REST API counter mode. These modes count from the visitor’s browser, so cached pages can still be counted. PHP mode counts while WordPress builds the page, so a page served from a cache without running WordPress is not counted.
+
+= Why are my own visits not counted? =
+
+Views from visitors you exclude in Exclude Visitors (for example logged-in users, specific roles or guests) or Exclude IPs are not counted. With a non-zero Count Interval, PVC uses cookies to avoid counting repeat views of the same content within that window. Blocking or clearing cookies can allow repeat Views. To test counting, open a counted post as a visitor your exclusions allow. A private window does not bypass IP or guest exclusions.
 
 = Is Post Views Counter GDPR compliant? =
 
@@ -123,6 +131,18 @@ If you’ve purchased Post Views Counter Pro, your license includes one year of 
 2. screenshot-2.png
 
 == Changelog ==
+
+= 1.8.2 =
+* New: Status tab with counting activity, configuration and data checks, button-triggered delivery checks, and a support report you can copy or download.
+* Fix: Keep JavaScript and REST API counting working when cached pages contain expired tokens.
+* Fix: Keep counting Views during Visits state recovery and restart the derived-metrics history after a counting gap.
+* Fix: Distinguish failed statistics reads from zero counts and avoid caching failed reads.
+* Fix: Report failed manual Views edits, preserve large totals, and prevent cancelled or unconfirmed editor updates from being replayed.
+* Fix: Assign counted Views to the same counting-clock period as their Visit decision.
+* Fix: Keep multisite activation and deactivation within the current network and preserve statistics during activation recovery.
+* Fix: Prevent concurrent ownership of schema maintenance, buffered-count saves and summary email sending.
+* Tweak: Group related Status checks, clarify license settings, and add settings-tab icons.
+* Tweak: Use WordPress notices for Status results and highlight warnings and critical findings in the Status tab icon.
 
 = 1.8.1 =
 * Fix: Activate the plugin over existing statistics without losing stored Views.
@@ -557,5 +577,5 @@ Initial release
 
 == Upgrade Notice ==
 
-= 1.8.1 =
-Fixes activation with existing statistics, Views access during Visits cache recovery, and frontend counter alignment.
+= 1.8.2 =
+Adds the Status tab and support report, fixes cached-page counting, and strengthens statistics recovery and manual Views editing.

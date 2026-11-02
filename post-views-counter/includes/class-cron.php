@@ -61,9 +61,11 @@ class Post_Views_Counter_Cron {
 	/**
 	 * Get the cleanup interval in days.
 	 *
+	 * @since 1.8.2 Public, for the Status tab's scheduled events.
+	 *
 	 * @return int Days, or 0 when the interval is zero or invalid
 	 */
-	private function get_reset_interval_days() {
+	public function get_reset_interval_days() {
 		$counter = [
 			'days'		=> 1,
 			'weeks'		=> 7,

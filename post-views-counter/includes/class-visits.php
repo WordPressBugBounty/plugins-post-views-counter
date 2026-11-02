@@ -39,6 +39,9 @@ class Post_Views_Counter_Visits {
 
 	const OPTION_NAME = 'post_views_counter_visits_state';
 	const LOCK_OPTION_NAME = 'post_views_counter_visits_schema_lock';
+
+	/** Codes the schema check stores as `schema.last_status`; diagnostics project no other value. */
+	const SCHEMA_STATUS_CODES = [ 'not_checked', 'checking', 'ready', 'schema_probe_failed', 'column_add_failed', 'column_incompatible', 'column_missing', 'table_missing' ];
 	const NETWORK_OPTION_NAME = 'post_views_counter_visits_schema_migration';
 	const CRON_HOOK = 'pvc_visits_schema_sweep';
 	const SCHEMA_VERSION = 1;
@@ -67,6 +70,18 @@ class Post_Views_Counter_Visits {
 
 	/** @var array<int,array> Request-local durable state rows by blog. */
 	private $durable_state_cache = [];
+
+	/** @var array<int,bool> Request-local live content-column probes by blog, used when the stored memo is not trusted. */
+	private $content_column_probe_cache = [];
+
+	/** @var int Depth of passive reads in progress; while positive, no memo is stored. */
+	private $passive_depth = 0;
+
+	/** @var array<int,true> Blogs whose durable state read failed in the current passive read; not retried until it ends. */
+	private $passive_read_failures = [];
+
+	/** @var array<int,array{record:array|false,state:array}> The request's last reconciled state by blog, with the durable snapshot it was reconciled against. */
+	private $reconciled_state = [];
 
 	/**
 	 * Blog whose singleton settings were loaded at construction time.
@@ -101,6 +116,9 @@ class Post_Views_Counter_Visits {
 	/** @var string|false Schema lease retained across destructive deletion. */
 	private $lifecycle_schema_lock_token = false;
 
+	/** @var string|null Exact raw tombstone this request's activation reviewed. */
+	private $lifecycle_tombstone_raw = null;
+
 	/**
 	 * Class constructor.
 	 *
@@ -118,7 +136,6 @@ class Post_Views_Counter_Visits {
 		add_action( 'upgrader_process_complete', [ $this, 'handle_upgrader_process_complete' ], 10, 2 );
 		add_action( 'update_option_post_views_counter_settings_general', [ $this, 'handle_general_settings_updated' ], 10, 3 );
 		add_action( 'add_option_post_views_counter_settings_general', [ $this, 'handle_general_settings_added' ], 10, 2 );
-		add_filter( 'pvc_plugin_status_rows', [ $this, 'add_plugin_status_rows' ], 20, 2 );
 	}
 
 	/**
@@ -742,6 +759,8 @@ class Post_Views_Counter_Visits {
 	 * @return void
 	 */
 	public function finish_site_state_deletion() {
+		$this->lifecycle_tombstone_raw = null;
+
 		if ( $this->is_measurement_fence_active() )
 			return;
 
@@ -824,10 +843,18 @@ class Post_Views_Counter_Visits {
 	/**
 	 * Accept only the exact current persisted state before it authorizes a write.
 	 *
-	 * @param mixed $value Raw unserialized option value.
+	 * With $allow_repair, a state held behind the cache-repair fence is accepted
+	 * too, unless a reset is in progress: Views may be counted while Visits wait
+	 * for the state to recover.
+	 *
+	 * @param mixed $value        Raw unserialized option value.
+	 * @param bool  $allow_repair Whether to accept a countable repair-fenced state.
 	 * @return bool
 	 */
-	public function is_current_normal_state_raw( $value ) {
+	public function is_current_normal_state_raw( $value, $allow_repair = false ) {
+		if ( $allow_repair && $this->is_cache_repair_state_raw( $value ) )
+			return $value['reason'] !== 'reset_in_progress';
+
 		if ( ! is_array( $value ) )
 			return false;
 
@@ -928,15 +955,16 @@ class Post_Views_Counter_Visits {
 	/**
 	 * Derive an unavailable response without changing the intended durable state.
 	 *
-	 * @param array $state Normalized state held behind the repair fence.
+	 * @param array  $state  Normalized state that cannot be verified as current.
+	 * @param string $reason Reason reported unless a reset is in progress.
 	 * @return array
 	 */
-	private function make_cache_repair_unavailable( $state ) {
+	private function make_cache_repair_unavailable( $state, $reason = 'state_format_unsupported' ) {
 		$state['state'] = 'unavailable';
 		$state['derived_since'] = null;
 
 		if ( $state['reason'] !== 'reset_in_progress' )
-			$state['reason'] = 'state_format_unsupported';
+			$state['reason'] = $reason;
 
 		return $state;
 	}
@@ -952,10 +980,12 @@ class Post_Views_Counter_Visits {
 		$failure_reason = 'schema_lock_unavailable';
 		$lock_token = $this->acquire_schema_lock();
 
+		// a nested setup that cannot take the lease keeps its caller's review
 		if ( $lock_token === false )
 			return false;
 
 		$this->lifecycle_schema_lock_token = $lock_token;
+		$this->lifecycle_tombstone_raw = null;
 		$durable = $this->read_durable_state( true );
 
 		if ( $this->is_cache_repair_state_raw( $durable === false ? null : $durable['value'] ) ) {
@@ -989,6 +1019,7 @@ class Post_Views_Counter_Visits {
 				return false;
 			}
 
+			$this->lifecycle_tombstone_raw = (string) $durable['raw'];
 			$failure_reason = '';
 			return 'tombstone';
 		}
@@ -1007,21 +1038,33 @@ class Post_Views_Counter_Visits {
 	 * The caller must verify empty-table recovery or explicitly authorize retaining
 	 * existing statistics under the lifecycle lease.
 	 *
+	 * Only the tombstone prepare_site_activation() reviewed is replaced, and only
+	 * while this request's lease row is unchanged since its unexpired check: one
+	 * UPDATE compares both rows, so a takeover or a newer tombstone makes it match
+	 * nothing. A lease that expires after the check without a takeover still
+	 * completes; activation deletes nothing.
+	 *
 	 * @return bool
 	 */
 	public function complete_site_activation() {
-		$result = $this->mutate_state(
-			function( $state, $record ) {
-				if ( ! $this->is_deactivation_tombstone_raw( $record['value'] ) )
-					return $record['value'];
+		if ( $this->lifecycle_tombstone_raw === null || $this->lifecycle_schema_lock_token === false )
+			return false;
 
+		$lease_raw = $this->get_owned_schema_lease_raw( $this->lifecycle_schema_lock_token );
+
+		if ( $lease_raw === false )
+			return false;
+
+		$result = $this->mutate_state(
+			function( $state ) {
 				$next = $this->normalize_state( [] );
 				$next['queue_generation'] = (int) $state['queue_generation'];
 				return $next;
 			},
+			false,
 			true,
 			true,
-			true
+			[ 'state_raw' => $this->lifecycle_tombstone_raw, 'lease_raw' => $lease_raw ]
 		);
 
 		return $result['success'];
@@ -1048,10 +1091,15 @@ class Post_Views_Counter_Visits {
 		if ( $durable !== false && $this->is_cache_repair_state_raw( $durable['value'] ) )
 			return $this->make_cache_repair_unavailable( $durable['state'] );
 
+		// An unsupported or malformed row is never reported as available.
+		if ( $durable !== false && $durable['exists'] && ! $this->is_current_normal_state_raw( $durable['value'] ) && ! $this->is_deactivation_tombstone_raw( $durable['value'] ) )
+			return $this->make_cache_repair_unavailable( $durable['state'] );
+
 		if ( $durable !== false )
 			return $durable['state'];
 
-		return $this->normalize_state( get_option( self::OPTION_NAME, [] ) );
+		// A failed read never presents the options cache as available.
+		return $this->make_cache_repair_unavailable( $this->normalize_state( get_option( self::OPTION_NAME, [] ) ), 'state_read_failed' );
 	}
 
 	/**
@@ -1119,16 +1167,33 @@ class Post_Views_Counter_Visits {
 		if ( ! $force && isset( $this->durable_state_cache[$blog_id] ) )
 			return $this->durable_state_cache[$blog_id];
 
-		$wpdb->last_error = '';
-		$raw = $wpdb->get_var( $wpdb->prepare( "SELECT `option_value` FROM `{$wpdb->options}` WHERE `option_name` = %s", self::OPTION_NAME ) );
-
-		if ( $wpdb->last_error !== '' )
+		// a passive read reports one failure for its whole scope
+		if ( ! $force && $this->passive_depth > 0 && isset( $this->passive_read_failures[$blog_id] ) )
 			return false;
 
+		// A failed query can return false with no error text and leave the
+		// previous query's rows in place, so the statement's own result decides
+		// before its row is read.
+		$wpdb->last_error = '';
+		$read = $wpdb->query( $wpdb->prepare( "SELECT `option_value` FROM `{$wpdb->options}` WHERE `option_name` = %s", self::OPTION_NAME ) );
+
+		if ( $read === false || $wpdb->last_error !== '' ) {
+			if ( $this->passive_depth > 0 )
+				$this->passive_read_failures[$blog_id] = true;
+
+			return false;
+		}
+
+		$raw = $wpdb->get_var( null );
 		$value = $raw === null ? [] : ( $this->is_measurement_fence_active() ? $this->decode_fenced_serialized_array( $raw ) : maybe_unserialize( $raw ) );
 
-		if ( $value === false )
+		if ( $value === false ) {
+			if ( $this->passive_depth > 0 )
+				$this->passive_read_failures[$blog_id] = true;
+
 			return false;
+		}
+
 		$record = [
 			'exists' => $raw !== null,
 			'raw' => $raw,
@@ -1173,7 +1238,7 @@ class Post_Views_Counter_Visits {
 	public function get_queue_generation() {
 		$durable = $this->read_durable_state( true );
 
-		if ( $durable === false || ( ! $this->is_current_normal_state_raw( $durable['value'] ) && ! $this->is_deactivation_tombstone_raw( $durable['value'] ) ) )
+		if ( $durable === false || ( ! $this->is_current_normal_state_raw( $durable['value'], true ) && ! $this->is_deactivation_tombstone_raw( $durable['value'] ) ) )
 			return false;
 
 		return (int) $durable['state']['queue_generation'];
@@ -1187,7 +1252,7 @@ class Post_Views_Counter_Visits {
 	public function get_queue_publish_generation() {
 		$durable = $this->read_durable_state( true );
 
-		if ( $durable === false || ! $this->is_current_normal_state_raw( $durable['value'] ) )
+		if ( $durable === false || ! $this->is_current_normal_state_raw( $durable['value'], true ) )
 			return false;
 
 		if ( $durable['state']['reason'] === 'reset_in_progress' || $this->is_deactivation_tombstone_raw( $durable['value'] ) )
@@ -1205,7 +1270,7 @@ class Post_Views_Counter_Visits {
 	public function get_write_fence_token( $force = false ) {
 		$durable = $this->read_durable_state( (bool) $force );
 
-		if ( $durable === false || ! $this->is_current_normal_state_raw( $durable['value'] ) )
+		if ( $durable === false || ! $this->is_current_normal_state_raw( $durable['value'], true ) )
 			return false;
 
 		if ( $durable['state']['reason'] === 'reset_in_progress' || $this->is_deactivation_tombstone_raw( $durable['value'] ) )
@@ -1221,13 +1286,16 @@ class Post_Views_Counter_Visits {
 	/**
 	 * Prevent public count reads while a destructive tombstone is authoritative.
 	 *
+	 * Views never depend on the Visits state: a state that cannot be read, waits
+	 * behind the cache-repair fence, has an unsupported format or is malformed
+	 * makes Visits unavailable, never stored Views.
+	 *
 	 * @return bool
 	 */
 	public function is_site_data_accessible() {
 		$durable = $this->read_durable_state();
 
-		return $durable !== false
-			&& ( ! $durable['exists'] || ( $this->is_current_normal_state_raw( $durable['value'] ) && ! $this->is_deactivation_tombstone_raw( $durable['value'] ) ) );
+		return $durable === false || ! $this->is_deactivation_tombstone_raw( $durable['value'] );
 	}
 
 	/**
@@ -1254,8 +1322,79 @@ class Post_Views_Counter_Visits {
 		if ( ! $force && isset( $this->availability_cache[$cache_key] ) && (int) $this->availability_cache[$cache_key]['checked_at'] === $now )
 			return $this->availability_cache[$cache_key]['value'];
 
-		$state = $this->refresh_availability( (bool) $force );
-		$fenced_reason = in_array( $state['reason'], [ 'reset_in_progress', 'core_deactivated' ], true ) ? $state['reason'] : '';
+		$result = $this->derive_visits_availability( $this->refresh_availability( (bool) $force ), $range, $normalized_range );
+
+		// Replace, never append: an elapsed second must not grow the cache.
+		$this->availability_cache[$cache_key] = [ 'checked_at' => $now, 'value' => $result ];
+
+		return $result;
+	}
+
+	/**
+	 * Derive the Visit availability axes from the request's state snapshot,
+	 * without the refresh get_visits_availability() runs first, which can
+	 * repair or publish state. For read-only diagnostics such as the Status
+	 * tab; counters and readers keep get_visits_availability().
+	 *
+	 * @since 1.8.2
+	 *
+	 * @param array|null $range Optional explicit start/end range.
+	 * @return array The same shape as get_visits_availability().
+	 */
+	public function get_passive_visits_availability( $range = null ) {
+		return $this->derive_visits_availability( $this->get_passive_state(), $range, $range === null ? null : $this->normalize_range( $range ) );
+	}
+
+	/**
+	 * The state availability is derived from, read passively: the request's
+	 * last reconciliation while the durable snapshot it saw is still current,
+	 * else that snapshot classified as get_state() does. A failed read stays a
+	 * failure: the Options API, which can publish the row to the object cache,
+	 * is never consulted.
+	 *
+	 * @return array Normalized state, with a persistence reason on failure.
+	 */
+	private function get_passive_state() {
+		$blog_id = is_multisite() ? (int) get_current_blog_id() : 0;
+		$durable = $this->read_durable_state();
+
+		if ( isset( $this->reconciled_state[$blog_id] ) && $this->reconciled_state[$blog_id]['record'] === $durable )
+			return $this->reconciled_state[$blog_id]['state'];
+
+		if ( $durable === false ) {
+			$state = $this->make_cache_repair_unavailable( $this->normalize_state( [] ), 'state_read_failed' );
+			$state['persistence_success'] = false;
+			$state['persistence_reason'] = 'state_read_failed';
+
+			return $state;
+		}
+
+		if ( $this->is_cache_repair_state_raw( $durable['value'] ) || ( $durable['exists'] && ! $this->is_current_normal_state_raw( $durable['value'] ) && ! $this->is_deactivation_tombstone_raw( $durable['value'] ) ) )
+			return $this->make_cache_repair_unavailable( $durable['state'] );
+
+		return $durable['state'];
+	}
+
+	/**
+	 * Derive the three Visit availability axes from one state.
+	 *
+	 * @param array      $state Normalized state, possibly with a persistence reason.
+	 * @param array|null $range Requested range.
+	 * @param array|null $normalized_range Normalized range, or null.
+	 * @return array
+	 */
+	private function derive_visits_availability( $state, $range, $normalized_range ) {
+		// Visits are available only from a state read from the database in the
+		// current format, after any successful repair. A failed read never trusts
+		// the options cache; a fenced, unsupported or malformed state is unavailable.
+		$unverified_reason = '';
+
+		if ( isset( $state['persistence_reason'] ) && in_array( $state['persistence_reason'], [ 'state_read_failed', 'state_format_unsupported' ], true ) )
+			$unverified_reason = $state['persistence_reason'];
+		elseif ( in_array( $state['reason'], [ 'state_read_failed', 'state_format_unsupported' ], true ) )
+			$unverified_reason = $state['reason'];
+
+		$fenced_reason = in_array( $state['reason'], [ 'reset_in_progress', 'core_deactivated' ], true ) ? $state['reason'] : $unverified_reason;
 		$readable = $fenced_reason === '' && $state['schema']['state'] === 'ready';
 
 		if ( $readable )
@@ -1287,7 +1426,7 @@ class Post_Views_Counter_Visits {
 			$derived_reason = 'ready';
 		}
 
-		$result = [
+		return [
 			'readable' => $readable,
 			'read_reason' => $read_reason,
 			'writable' => $writable,
@@ -1296,11 +1435,70 @@ class Post_Views_Counter_Visits {
 			'derived_available' => $derived_available,
 			'derived_reason' => $derived_reason
 		];
+	}
 
-		// Replace, never append: an elapsed second must not grow the cache.
-		$this->availability_cache[$cache_key] = [ 'checked_at' => $now, 'value' => $result ];
+	/**
+	 * Describe the stored Visits state for read-only diagnostics, as codes
+	 * only: no error text, token or raw value. Reads the request's durable
+	 * snapshot and the schema lease row; writes, repairs and publishes nothing.
+	 *
+	 * @since 1.8.2
+	 *
+	 * @return array{read_ok:bool,kind:string,row:array,access:array,eligibility:array,lease:array}
+	 */
+	public function get_status_snapshot() {
+		$durable = $this->read_durable_state();
+		$row = [ 'format_version' => null, 'state' => null, 'reason' => null, 'schema_state' => null, 'schema_last_status' => null, 'queue_generation' => null, 'derived_since' => null ];
 
-		return $result;
+		if ( $durable === false )
+			$kind = 'unreadable';
+		elseif ( ! $durable['exists'] )
+			$kind = 'missing';
+		elseif ( $this->is_deactivation_tombstone_raw( $durable['value'] ) )
+			$kind = 'tombstone';
+		elseif ( $this->is_cache_repair_state_raw( $durable['value'] ) )
+			$kind = 'repair';
+		elseif ( $this->is_current_normal_state_raw( $durable['value'] ) )
+			$kind = 'normal';
+		elseif ( is_array( $durable['value'] ) && isset( $durable['value']['format_version'] ) && is_int( $durable['value']['format_version'] ) && $durable['value']['format_version'] > 1 )
+			$kind = 'future';
+		else
+			$kind = 'malformed';
+
+		// codes from a row whose shape was verified; a malformed row reports none
+		if ( in_array( $kind, [ 'normal', 'repair', 'tombstone' ], true ) ) {
+			$value = $durable['value'];
+			$state = $durable['state'];
+			$row = [
+				'format_version' => (int) $value['format_version'],
+				'state' => (string) $state['state'],
+				'reason' => (string) $state['reason'],
+				'schema_state' => $kind === 'tombstone' ? null : (string) $state['schema']['state'],
+				'schema_last_status' => $kind === 'tombstone' ? null : ( in_array( $state['schema']['last_status'], self::SCHEMA_STATUS_CODES, true ) ? $state['schema']['last_status'] : 'unrecognized' ),
+				'queue_generation' => (int) $state['queue_generation'],
+				'derived_since' => $state['derived_since'] === null ? null : (int) $state['derived_since']
+			];
+		} elseif ( $kind === 'future' )
+			$row['format_version'] = (int) $durable['value']['format_version'];
+
+		$lease = $this->read_option_durable( self::LOCK_OPTION_NAME );
+		$lease_value = $lease === false ? null : $lease['value'];
+
+		return [
+			'read_ok' => $durable !== false,
+			'kind' => $kind,
+			'row' => $row,
+			'access' => [
+				'allowed' => $kind !== 'tombstone',
+				'reason' => $kind === 'tombstone' ? 'core_deactivated' : ( $durable === false ? 'state_read_failed' : 'ready' )
+			],
+			'eligibility' => $this->get_count_eligibility(),
+			'lease' => [
+				'read_ok' => $lease !== false,
+				'present' => $lease !== false && $lease['exists'],
+				'expires_at' => is_array( $lease_value ) && isset( $lease_value['expires_at'] ) && is_int( $lease_value['expires_at'] ) ? $lease_value['expires_at'] : null
+			]
+		];
 	}
 
 	/**
@@ -1314,7 +1512,24 @@ class Post_Views_Counter_Visits {
 	 * @return array
 	 */
 	public function refresh_availability( $force = false, $settings = null, $runtime_overrides = [] ) {
-		$now = $this->now();
+		$state = $this->reconcile_availability( $force, $settings, $runtime_overrides );
+		$blog_id = is_multisite() ? (int) get_current_blog_id() : 0;
+
+		// kept with the snapshot it saw, for passive readers
+		$this->reconciled_state[$blog_id] = [ 'record' => isset( $this->durable_state_cache[$blog_id] ) ? $this->durable_state_cache[$blog_id] : false, 'state' => $state ];
+
+		return $state;
+	}
+
+	/**
+	 * Reconcile the state for refresh_availability().
+	 *
+	 * @param bool       $force Bypass the durable-state request cache.
+	 * @param array|null $settings Optional General settings snapshot.
+	 * @param array      $runtime_overrides Controlled lifecycle/test overrides.
+	 * @return array
+	 */
+	private function reconcile_availability( $force, $settings, $runtime_overrides ) {
 		// Ordinary availability derivation shares the verified request snapshot.
 		// Forced lifecycle/publication/recovery paths still require a fresh read.
 		$initial = $this->read_durable_state( $force );
@@ -1353,10 +1568,13 @@ class Post_Views_Counter_Visits {
 		if ( $initial['state']['reason'] === 'reset_in_progress' )
 			return $initial['state'];
 
-		$reconcile = function( $state, $record, $attempt ) use ( $settings, $runtime_overrides, $now ) {
+		$reconcile = function( $state, $record, $attempt ) use ( $settings, $runtime_overrides ) {
 			if ( $state['reason'] === 'reset_in_progress' || $this->is_deactivation_tombstone_raw( $record['value'] ) )
 				return $state;
 
+			// Read the clock after any repair, so a restarted derived window never
+			// starts before the recovery that ended an outage.
+			$now = $this->now();
 			$original = $state;
 
 			if ( $attempt === 0 )
@@ -1402,8 +1620,10 @@ class Post_Views_Counter_Visits {
 				$availability_reason = 'ready';
 
 			if ( $availability_reason === 'ready' ) {
+				// A restart never moves the window before a boundary already stored,
+				// such as a recovered reset's.
 				if ( $state['derived_since'] === null || ( ! $was_writable && $original['reason'] !== 'reset_complete' ) )
-					$state['derived_since'] = $now;
+					$state['derived_since'] = max( $now, (int) $state['derived_since'] );
 
 				$state['state'] = 'ready';
 				$state['reason'] = 'ready';
@@ -1837,6 +2057,9 @@ class Post_Views_Counter_Visits {
 	public function invalidate_availability_cache() {
 		$this->availability_cache = [];
 		$this->durable_state_cache = [];
+		$this->content_column_probe_cache = [];
+		$this->reconciled_state = [];
+		$this->passive_read_failures = [];
 	}
 
 	/**
@@ -1848,10 +2071,19 @@ class Post_Views_Counter_Visits {
 	public function get_shared_content_column_status() {
 		global $wpdb;
 
-		$state = $this->get_state();
+		// Trust the stored shape memo only from a state read from the database in
+		// the current or repair-fenced format (a missing row has no memo yet). A
+		// failed read, an unsupported or a malformed state is never trusted: the
+		// table is probed instead.
+		$durable = $this->read_durable_state();
+		$trusted = $durable !== false && ( ! $durable['exists'] || $this->is_current_normal_state_raw( $durable['value'] ) || $this->is_cache_repair_state_raw( $durable['value'] ) );
+		$blog_id = is_multisite() ? (int) get_current_blog_id() : 0;
 
-		if ( is_bool( $state['schema']['content_column'] ) )
-			return $state['schema']['content_column'];
+		if ( $trusted && is_bool( $durable['state']['schema']['content_column'] ) )
+			return $durable['state']['schema']['content_column'];
+
+		if ( ( ! $trusted || $this->passive_depth > 0 ) && isset( $this->content_column_probe_cache[$blog_id] ) )
+			return $this->content_column_probe_cache[$blog_id];
 
 		// Table metadata is independent of publishing its memoized state. A failed
 		// cache repair must not turn a verified legacy shape into invalid SQL.
@@ -1859,6 +2091,14 @@ class Post_Views_Counter_Visits {
 
 		if ( $probe === null )
 			return null;
+
+		// An untrusted state cannot store the memo, and a passive read stores
+		// nothing; keep the probe for this request.
+		if ( ! $trusted || $this->passive_depth > 0 ) {
+			$this->content_column_probe_cache[$blog_id] = $probe;
+
+			return $probe;
+		}
 
 		$this->mutate_state(
 			function( $latest, $record, $attempt ) use ( $wpdb, &$probe ) {
@@ -1877,12 +2117,36 @@ class Post_Views_Counter_Visits {
 	}
 
 	/**
+	 * Run a read that must store nothing, such as a diagnostic: shape memos
+	 * found missing are kept for the request instead of being published, and
+	 * a failed state read is not retried until the outermost passive read ends.
+	 *
+	 * @since 1.8.2
+	 *
+	 * @param callable $callback Read to run.
+	 * @return mixed The callback's result.
+	 */
+	public function run_passive( $callback ) {
+		$this->passive_depth++;
+
+		try {
+			return $callback();
+		} finally {
+			$this->passive_depth--;
+
+			if ( $this->passive_depth === 0 )
+				$this->passive_read_failures = [];
+		}
+	}
+
+	/**
 	 * Force one later table-shape probe after the companion changes the shared
 	 * schema.
 	 *
 	 * @return void
 	 */
 	public function invalidate_shared_table_shape() {
+		$this->content_column_probe_cache = [];
 		$this->mutate_state(
 			function( $state ) {
 				$state['schema']['content_column'] = null;
@@ -1893,8 +2157,10 @@ class Post_Views_Counter_Visits {
 	}
 
 	/**
-	 * Add bounded, privacy-safe readiness data to the existing Plugin Status
-	 * table. Values contain only stable codes, timestamps, counts, and versions.
+	 * Add bounded, privacy-safe readiness rows to a status rows list. Values
+	 * contain only stable codes, timestamps, counts, and versions. It refreshes
+	 * availability, so it is not hooked into a page: the Status tab reads the
+	 * same facts passively.
 	 *
 	 * @param array $rows Existing rows.
 	 * @param mixed $settings Settings instance (unused, retained for filter shape).
@@ -1904,7 +2170,8 @@ class Post_Views_Counter_Visits {
 		$state = $this->refresh_availability();
 		$status = $this->get_visits_availability();
 		$data_accessible = $this->is_site_data_accessible();
-		$access_reason = $data_accessible ? 'ready' : ( isset( $state['persistence_reason'] ) ? $state['persistence_reason'] : $state['reason'] );
+		$access_reason = $data_accessible ? 'ready' : 'core_deactivated';
+		$eligibility = $this->get_count_eligibility();
 
 		$rows[] = [
 			'label' => __( 'Visits Readiness', 'post-views-counter' ),
@@ -1920,11 +2187,44 @@ class Post_Views_Counter_Visits {
 					(int) $state['last_compatibility_check'] > 0 ? gmdate( 'c', (int) $state['last_compatibility_check'] ) : __( 'never', 'post-views-counter' )
 				),
 				sprintf( /* translators: 1: Core version, 2: extension version */ __( 'Versions: Core %1$s; Pro %2$s', 'post-views-counter' ), $state['versions']['core'] !== '' ? $state['versions']['core'] : __( 'unknown', 'post-views-counter' ), $state['versions']['pro'] !== '' ? $state['versions']['pro'] : __( 'inactive', 'post-views-counter' ) ),
-				sprintf( /* translators: 1: Views data access, 2: reason code */ __( 'Views access: %1$s (%2$s)', 'post-views-counter' ), $data_accessible ? __( 'ready', 'post-views-counter' ) : __( 'blocked', 'post-views-counter' ), $access_reason )
+				sprintf( /* translators: 1: Views data access, 2: reason code */ __( 'Views access: %1$s (%2$s)', 'post-views-counter' ), $data_accessible ? __( 'ready', 'post-views-counter' ) : __( 'blocked', 'post-views-counter' ), $access_reason ),
+				sprintf( /* translators: 1: count eligibility, 2: reason code */ __( 'Count eligibility: %1$s (%2$s)', 'post-views-counter' ), $eligibility['eligible'] ? __( 'eligible', 'post-views-counter' ) : __( 'blocked', 'post-views-counter' ), $eligibility['reason'] ),
+				__( 'Eligibility does not confirm that a count was stored. Database or cache failures and exclusions can still prevent counting.', 'post-views-counter' )
 			]
 		];
 
 		return $rows;
+	}
+
+	/**
+	 * Explain the write fence the counter uses for a View, with a reason code.
+	 *
+	 * Eligible with `views_only` means the state waits behind the cache-repair
+	 * fence: Views are written, Visits are not.
+	 *
+	 * @return array{eligible:bool,reason:string}
+	 */
+	private function get_count_eligibility() {
+		// One snapshot: a successful read is kept for the request, so the fence
+		// below judges the same record this reason describes.
+		$durable = $this->read_durable_state();
+
+		if ( $durable === false )
+			return [ 'eligible' => false, 'reason' => 'state_read_failed' ];
+
+		if ( $this->get_write_fence_token() !== false )
+			return [ 'eligible' => true, 'reason' => $this->is_cache_repair_state_raw( $durable['value'] ) ? 'views_only' : 'ready' ];
+
+		if ( $this->is_deactivation_tombstone_raw( $durable['value'] ) )
+			return [ 'eligible' => false, 'reason' => 'core_deactivated' ];
+
+		if ( ! $durable['exists'] )
+			return [ 'eligible' => false, 'reason' => 'state_missing' ];
+
+		if ( $durable['state']['reason'] === 'reset_in_progress' && ( $this->is_current_normal_state_raw( $durable['value'] ) || $this->is_cache_repair_state_raw( $durable['value'] ) ) )
+			return [ 'eligible' => false, 'reason' => 'reset_in_progress' ];
+
+		return [ 'eligible' => false, 'reason' => 'state_format_unsupported' ];
 	}
 
 	/**
@@ -2066,13 +2366,15 @@ class Post_Views_Counter_Visits {
 		$wpdb->last_error = '';
 
 		try {
-			$found = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) );
+			$result = $wpdb->query( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) );
 			$error = $wpdb->last_error;
+			$found = $result === false ? null : $wpdb->get_var( null );
 		} finally {
 			$wpdb->suppress_errors( $previous );
 		}
 
-		if ( $error !== '' )
+		// a lost connection fails without error text and keeps the previous rows
+		if ( $result === false || $error !== '' )
 			return [ 'status' => 'error' ];
 
 		return [ 'status' => is_string( $found ) && $found === $table ? 'found' : 'missing' ];
@@ -2092,13 +2394,15 @@ class Post_Views_Counter_Visits {
 		$wpdb->last_error = '';
 
 		try {
-			$found = $wpdb->get_var( $wpdb->prepare( "SHOW COLUMNS FROM `{$table}` LIKE %s", $column ) );
+			$result = $wpdb->query( $wpdb->prepare( "SHOW COLUMNS FROM `{$table}` LIKE %s", $column ) );
 			$error = $wpdb->last_error;
+			$found = $result === false ? null : $wpdb->get_var( null );
 		} finally {
 			$wpdb->suppress_errors( $previous );
 		}
 
-		if ( $error !== '' )
+		// a lost connection fails without error text and keeps the previous rows
+		if ( $result === false || $error !== '' )
 			return null;
 
 		return is_string( $found ) && $found === $column;
@@ -2408,19 +2712,126 @@ class Post_Views_Counter_Visits {
 		$wpdb->last_error = '';
 
 		try {
-			$column = $wpdb->get_row( "SHOW COLUMNS FROM `{$table}` LIKE 'visits'", ARRAY_A );
+			$result = $wpdb->query( "SHOW COLUMNS FROM `{$table}` LIKE 'visits'" );
 			$error = $wpdb->last_error;
+			// get_row() needs a query; get_var( null ) would read only one field
+			$column = $result !== false && isset( $wpdb->last_result[0] ) ? get_object_vars( $wpdb->last_result[0] ) : null;
 		} finally {
 			$wpdb->suppress_errors( $previous );
 		}
 
-		if ( $error !== '' )
+		// a lost connection fails without error text and keeps the previous rows
+		if ( $result === false || $error !== '' )
 			return [ 'status' => 'error', 'column' => null ];
 
 		return [
 			'status' => is_array( $column ) ? 'found' : 'missing',
 			'column' => is_array( $column ) ? $column : null
 		];
+	}
+
+	/**
+	 * Return whether a leftover statistics table has a supported structure.
+	 *
+	 * Tombstone recovery keeps an existing table instead of rebuilding it, so it
+	 * first accepts only the two shapes the plugins create: Core's, and the
+	 * extension's with its `content` column in the primary key and the unique
+	 * index. The `visits` column is left to the Visits migration. Engine and
+	 * collation are kept as they are. A failed metadata read is not supported.
+	 *
+	 * @param string $table Table name.
+	 * @return bool
+	 */
+	public function is_recoverable_table_shape( $table ) {
+		global $wpdb;
+
+		$previous = $wpdb->suppress_errors( true );
+		$wpdb->last_error = '';
+
+		try {
+			$columns = $wpdb->get_results( "SHOW FULL COLUMNS FROM `{$table}`", ARRAY_A );
+			$error = $wpdb->last_error;
+			$indexes = $error === '' ? $wpdb->get_results( "SHOW INDEX FROM `{$table}`", ARRAY_A ) : [];
+			$error = $wpdb->last_error;
+		} finally {
+			$wpdb->suppress_errors( $previous );
+		}
+
+		if ( $error !== '' || ! is_array( $columns ) || ! is_array( $indexes ) )
+			return false;
+
+		$definitions = [];
+
+		foreach ( $columns as $column )
+			$definitions[ strtolower( (string) $column['Field'] ) ] = $column;
+
+		$extension = isset( $definitions['content'] );
+		$expected = [
+			'id' => [ 'bigint', true, null ],
+			'type' => [ 'tinyint', true, null ],
+			'period' => [ 'varchar', false, 8 ],
+			'count' => [ 'bigint', true, null ]
+		];
+
+		if ( $extension )
+			$expected['content'] = [ 'tinyint', true, null ];
+
+		unset( $definitions['visits'] );
+
+		if ( array_diff_key( $definitions, $expected ) !== [] )
+			return false;
+
+		foreach ( $expected as $name => $definition ) {
+			if ( ! isset( $definitions[ $name ] ) )
+				return false;
+
+			$column = $definitions[ $name ];
+
+			// compare the data type and sign, not the display width
+			if ( ! preg_match( '/^([a-z]+)(?:\((\d+)\))?( unsigned)?/', strtolower( (string) $column['Type'] ), $type ) )
+				return false;
+
+			if ( $type[1] !== $definition[0] || ! empty( $type[3] ) !== $definition[1] || strtoupper( (string) $column['Null'] ) !== 'NO' )
+				return false;
+
+			if ( $definition[2] !== null && ( ! isset( $type[2] ) || (int) $type[2] !== $definition[2] ) )
+				return false;
+		}
+
+		if ( $extension && trim( (string) $definitions['content']['Default'], "'" ) !== '0' )
+			return false;
+
+		$unique = [];
+
+		foreach ( $indexes as $index ) {
+			if ( (int) $index['Non_unique'] !== 0 )
+				continue;
+
+			if ( $index['Sub_part'] !== null )
+				return false;
+
+			$unique[ (string) $index['Key_name'] ][ (int) $index['Seq_in_index'] ] = strtolower( (string) $index['Column_name'] );
+		}
+
+		foreach ( $unique as $name => $index_columns ) {
+			ksort( $index_columns );
+			$unique[ $name ] = array_values( $index_columns );
+		}
+
+		$expected_unique = [
+			'PRIMARY' => [ 'type', 'period', 'id' ],
+			'id_type_period_count' => [ 'id', 'type', 'period', 'count' ]
+		];
+
+		if ( $extension ) {
+			$expected_unique['PRIMARY'][] = 'content';
+			$expected_unique['id_type_period_count'][] = 'content';
+		}
+
+		ksort( $unique );
+		ksort( $expected_unique );
+
+		return $unique === $expected_unique;
 	}
 
 	/**
@@ -2554,8 +2965,13 @@ class Post_Views_Counter_Visits {
 			'expires_at' => $this->now() + self::SCHEMA_PENDING_LEASE
 		];
 
-		if ( add_option( self::LOCK_OPTION_NAME, $lock, '', false ) )
+		$inserted = $this->insert_option_if_missing( self::LOCK_OPTION_NAME, $lock );
+
+		if ( $inserted === 1 )
 			return $token;
+
+		if ( $inserted === false )
+			return false;
 
 		$record = $this->read_option_durable( self::LOCK_OPTION_NAME );
 
@@ -2577,14 +2993,26 @@ class Post_Views_Counter_Visits {
 	 * @return bool
 	 */
 	private function owns_schema_lock( $token ) {
+		return $this->get_owned_schema_lease_raw( $token ) !== false;
+	}
+
+	/**
+	 * Read the exact raw lease row while it is current, unexpired and owned.
+	 *
+	 * @param string $token Expected owner token.
+	 * @return string|false
+	 */
+	private function get_owned_schema_lease_raw( $token ) {
 		$record = $this->read_option_durable( self::LOCK_OPTION_NAME );
 		$current = $record === false ? null : $record['value'];
 
-		return is_array( $current )
+		$owned = is_array( $current )
 			&& isset( $current['token'], $current['expires_at'] )
 			&& is_string( $current['token'] )
 			&& (int) $current['expires_at'] > $this->now()
 			&& hash_equals( $current['token'], $token );
+
+		return $owned ? (string) $record['raw'] : false;
 	}
 
 	/**
@@ -2622,25 +3050,70 @@ class Post_Views_Counter_Visits {
 	}
 
 	/**
-	 * Read an option row without trusting a possibly stale Options API cache.
+	 * Read an option row without trusting a possibly stale Options API cache,
+	 * and without filling it.
+	 *
+	 * @since 1.8.2 Public, for passive diagnostics.
 	 *
 	 * @param string $name Option name.
-	 * @return array|false
+	 * @return array{exists:bool,raw:string|null,value:mixed}|false False when the read fails.
 	 */
-	private function read_option_durable( $name ) {
+	public function read_option_durable( $name ) {
 		global $wpdb;
 
+		// the statement's own result decides, as in read_durable_state()
 		$wpdb->last_error = '';
-		$raw = $wpdb->get_var( $wpdb->prepare( "SELECT `option_value` FROM `{$wpdb->options}` WHERE `option_name` = %s", $name ) );
+		$read = $wpdb->query( $wpdb->prepare( "SELECT `option_value` FROM `{$wpdb->options}` WHERE `option_name` = %s", $name ) );
 
-		if ( $wpdb->last_error !== '' )
+		if ( $read === false || $wpdb->last_error !== '' )
 			return false;
+
+		$raw = $wpdb->get_var( null );
 
 		return [
 			'exists' => $raw !== null,
 			'raw' => $raw,
 			'value' => $raw === null ? null : maybe_unserialize( $raw )
 		];
+	}
+
+	/**
+	 * Create an option only when no row exists yet.
+	 *
+	 * add_option() upserts once its existence check has passed, so two requests
+	 * creating the same row would both succeed and the later one would replace
+	 * the earlier one's value. A duplicate here changes nothing; the caller
+	 * re-reads the row and follows its compare-and-swap path. Every lease
+	 * (the schema lease, the queue flush lock, the email send lock) is
+	 * created this way.
+	 *
+	 * @param string $name Option name.
+	 * @param mixed  $value Option value.
+	 * @return int|false 1 when created, 0 when the row already exists, false on a database error.
+	 */
+	public function insert_option_if_missing( $name, $value ) {
+		global $wpdb;
+
+		$wpdb->last_error = '';
+		$inserted = $wpdb->query( $wpdb->prepare( "INSERT IGNORE INTO `{$wpdb->options}` (`option_name`, `option_value`, `autoload`) VALUES (%s, %s, 'no')", $name, maybe_serialize( $value ) ) );
+
+		// whatever happened, the caller's next read sees the row as it is now,
+		// never a cached "no such option"
+		wp_cache_delete( $name, 'options' );
+		wp_cache_delete( 'notoptions', 'options' );
+		wp_cache_delete( 'alloptions', 'options' );
+
+		if ( $inserted === false || $wpdb->last_error !== '' )
+			return false;
+
+		if ( (int) $inserted !== 1 )
+			return 0;
+
+		// the hooks add_option() fires after creating an option
+		do_action( "add_option_{$name}", $name, $value );
+		do_action( 'added_option', $name, $value );
+
+		return 1;
 	}
 
 	/**
@@ -2679,7 +3152,7 @@ class Post_Views_Counter_Visits {
 	 * @param mixed  $expected Expected value.
 	 * @return bool
 	 */
-	private function delete_option_if_unchanged( $name, $expected ) {
+	public function delete_option_if_unchanged( $name, $expected ) {
 		global $wpdb;
 
 		$result = $wpdb->query(
@@ -2702,10 +3175,14 @@ class Post_Views_Counter_Visits {
 	/**
 	 * Complete a durable version-0 cache-repair obligation.
 	 *
-	 * @param array $record Durable version-0 state record.
+	 * Promoting a row the caller did not write itself restarts the derived
+	 * window: Views may have been counted without Visits while it was fenced.
+	 *
+	 * @param array       $record  Durable version-0 state record.
+	 * @param string|null $own_raw Exact raw value the caller has just written, if any.
 	 * @return array
 	 */
-	private function repair_cache_state( $record ) {
+	private function repair_cache_state( $record, $own_raw = null ) {
 		$last = $record;
 
 		for ( $attempt = 0; $attempt < self::STATE_WRITE_ATTEMPTS; $attempt++ ) {
@@ -2728,6 +3205,22 @@ class Post_Views_Counter_Visits {
 
 			$ready = $current['value'];
 			$ready['format_version'] = 1;
+
+			// Only the caller's own row keeps its boundary; any other row restarts
+			// the window, which the reconciliation sets after this promotion. A
+			// boundary still ahead of the clock, such as a completed reset's when
+			// clocks disagree, is kept as the restart's floor, and the row is marked
+			// as recovering so that every later reconciliation restarts from it. A
+			// reset in progress keeps its boundary unchanged.
+			if ( ( $own_raw === null || ! hash_equals( (string) $own_raw, (string) $current['raw'] ) ) && $ready['reason'] !== 'reset_in_progress' ) {
+				if ( $ready['derived_since'] === null || (int) $ready['derived_since'] <= $this->now() )
+					$ready['derived_since'] = null;
+				else {
+					$ready['state'] = 'unavailable';
+					$ready['reason'] = 'state_recovered';
+				}
+			}
+
 			$ready_raw = maybe_serialize( $ready );
 			$updated = $this->compare_and_swap_state_raw( $current['raw'], $ready );
 
@@ -2772,22 +3265,38 @@ class Post_Views_Counter_Visits {
 	/**
 	 * Atomically replace the raw state row.
 	 *
-	 * @param string $expected_raw Exact serialized value being replaced.
-	 * @param array  $next Replacement value.
+	 * @param string      $expected_raw Exact serialized value being replaced.
+	 * @param array       $next Replacement value.
+	 * @param string|null $lease_raw Exact raw schema lease that must still be stored, if any.
 	 * @return int|false
 	 */
-	private function compare_and_swap_state_raw( $expected_raw, $next ) {
+	private function compare_and_swap_state_raw( $expected_raw, $next, $lease_raw = null ) {
 		global $wpdb;
 
 		$wpdb->last_error = '';
-		$updated = $wpdb->query(
-			$wpdb->prepare(
-				"UPDATE `{$wpdb->options}` SET `option_value` = %s WHERE `option_name` = %s AND BINARY `option_value` = BINARY %s",
-				maybe_serialize( $next ),
-				self::OPTION_NAME,
-				$expected_raw
-			)
-		);
+
+		if ( $lease_raw === null ) {
+			$updated = $wpdb->query(
+				$wpdb->prepare(
+					"UPDATE `{$wpdb->options}` SET `option_value` = %s WHERE `option_name` = %s AND BINARY `option_value` = BINARY %s",
+					maybe_serialize( $next ),
+					self::OPTION_NAME,
+					$expected_raw
+				)
+			);
+		} else {
+			// one statement compares the state and lease rows together
+			$updated = $wpdb->query(
+				$wpdb->prepare(
+					"UPDATE `{$wpdb->options}` AS `state` INNER JOIN `{$wpdb->options}` AS `lease` ON `lease`.`option_name` = %s AND BINARY `lease`.`option_value` = BINARY %s SET `state`.`option_value` = %s WHERE `state`.`option_name` = %s AND BINARY `state`.`option_value` = BINARY %s",
+					self::LOCK_OPTION_NAME,
+					$lease_raw,
+					maybe_serialize( $next ),
+					self::OPTION_NAME,
+					$expected_raw
+				)
+			);
+		}
 
 		return $updated === false || $wpdb->last_error !== '' ? false : (int) $updated;
 	}
@@ -2799,9 +3308,11 @@ class Post_Views_Counter_Visits {
 	 * @param bool     $allow_create Whether a missing row may be initialized.
 	 * @param bool     $retire_reads Whether derived Visit caches must be retired.
 	 * @param bool     $allow_terminal Whether the exact deactivation tombstone may be replaced.
+	 * @param array    $guard Optional exact raw `state_raw` the row must hold, checked before
+	 *                        any repair, and `lease_raw` the schema lease must hold at the write.
 	 * @return array
 	 */
-	private function mutate_state( $callback, $allow_create = false, $retire_reads = true, $allow_terminal = false ) {
+	private function mutate_state( $callback, $allow_create = false, $retire_reads = true, $allow_terminal = false, $guard = null ) {
 		$last = false;
 
 		for ( $attempt = 0; $attempt < self::STATE_WRITE_ATTEMPTS; $attempt++ ) {
@@ -2809,6 +3320,9 @@ class Post_Views_Counter_Visits {
 
 			if ( $current === false )
 				return [ 'success' => false, 'committed' => false, 'cache_success' => false, 'state' => $this->get_state(), 'reason' => 'state_read_failed' ];
+
+			if ( $guard !== null && ( ! $current['exists'] || ! hash_equals( $guard['state_raw'], (string) $current['raw'] ) ) )
+				return [ 'success' => false, 'committed' => false, 'cache_success' => false, 'state' => $current['state'], 'reason' => 'state_conflict' ];
 
 			if ( $this->is_cache_repair_state_raw( $current['value'] ) ) {
 				$repair = $this->repair_cache_state( $current );
@@ -2849,9 +3363,9 @@ class Post_Views_Counter_Visits {
 			}
 
 			if ( $current['exists'] )
-				$committed = $this->compare_and_swap_state_raw( $current['raw'], $persisted );
+				$committed = $this->compare_and_swap_state_raw( $current['raw'], $persisted, $guard === null ? null : $guard['lease_raw'] );
 			elseif ( $allow_create )
-				$committed = add_option( self::OPTION_NAME, $persisted, '', false ) ? 1 : 0;
+				$committed = $this->insert_option_if_missing( self::OPTION_NAME, $persisted );
 			else
 				return [ 'success' => false, 'committed' => false, 'cache_success' => false, 'state' => $current['state'], 'reason' => 'state_missing' ];
 
@@ -2868,7 +3382,7 @@ class Post_Views_Counter_Visits {
 				return [ 'success' => false, 'committed' => true, 'cache_success' => false, 'state' => $this->normalize_state( $persisted ), 'reason' => 'state_read_failed' ];
 
 			if ( $needs_repair ) {
-				$repair = $this->repair_cache_state( $latest );
+				$repair = $this->repair_cache_state( $latest, maybe_serialize( $persisted ) );
 				return [ 'success' => $repair['success'], 'committed' => true, 'cache_success' => $repair['success'], 'state' => $repair['state'], 'reason' => $repair['reason'] ];
 			}
 
@@ -2953,16 +3467,38 @@ class Post_Views_Counter_Visits {
 	 *
 	 * @return bool
 	 */
-	private function schema_sweep_needed() {
+	private function schema_sweep_needed( $state = null ) {
 		if ( is_multisite() && $this->has_network_migration_state() ) {
 			$status = $this->get_network_status( get_current_network_id() );
 
 			return (int) $status['version'] !== self::SCHEMA_VERSION || empty( $status['complete'] ) || ! empty( $status['failed_sites'] ) || ! empty( $status['failed_sites_omitted'] );
 		}
 
-		$state = $this->get_state();
+		$state = $state === null ? $this->get_state() : $state;
 
 		return $state['schema']['state'] !== 'ready' && ( $state['schema']['state'] !== 'failed' || ! empty( $state['schema']['retryable'] ) );
+	}
+
+	/**
+	 * Whether the schema sweep event is expected now: only on the main site
+	 * (a single site counts as its main site) and only while the sweep has
+	 * work. Reads state passively; unknown when the state cannot be read.
+	 *
+	 * @since 1.8.2
+	 *
+	 * @return bool|null Null when the state read fails.
+	 */
+	public function is_schema_sweep_expected() {
+		if ( ! is_main_site() )
+			return false;
+
+		if ( is_multisite() && $this->has_network_migration_state() )
+			return $this->schema_sweep_needed();
+
+		if ( $this->read_durable_state() === false )
+			return null;
+
+		return $this->schema_sweep_needed( $this->get_passive_state() );
 	}
 
 	/**

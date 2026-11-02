@@ -778,7 +778,9 @@ class Post_Views_Counter_Visits_Query {
 				return [ 'values' => $values, 'availability' => $context['availability'], 'error' => 'read_failed' ];
 
 			$rows = $result['value'];
-			wp_cache_add( $cache_key, $rows, self::POST_VISITS_CACHE_GROUP, absint( apply_filters( 'pvc_visits_object_cache_expire', 300 ) ) );
+
+			if ( $result['cacheable'] )
+				wp_cache_add( $cache_key, $rows, self::POST_VISITS_CACHE_GROUP, absint( apply_filters( 'pvc_visits_object_cache_expire', 300 ) ) );
 		}
 
 		$values = array_fill_keys( $post_ids, 0 );
@@ -840,7 +842,9 @@ class Post_Views_Counter_Visits_Query {
 				return [ 'values' => $values, 'availability' => $context['availability'], 'error' => 'read_failed' ];
 
 			$rows = $result['value'];
-			wp_cache_add( $cache_key, $rows, self::POST_VISITS_CACHE_GROUP, absint( apply_filters( 'pvc_visits_object_cache_expire', 300 ) ) );
+
+			if ( $result['cacheable'] )
+				wp_cache_add( $cache_key, $rows, self::POST_VISITS_CACHE_GROUP, absint( apply_filters( 'pvc_visits_object_cache_expire', 300 ) ) );
 		}
 
 		$values = array_fill_keys( $content_ids, 0 );
@@ -904,7 +908,9 @@ class Post_Views_Counter_Visits_Query {
 				return [ 'values' => null, 'availability' => $context['availability'], 'error' => 'read_failed' ];
 
 			$rows = $result['value'];
-			wp_cache_add( $cache_key, $rows, self::POST_VISITS_CACHE_GROUP, absint( apply_filters( 'pvc_visits_object_cache_expire', 300 ) ) );
+
+			if ( $result['cacheable'] )
+				wp_cache_add( $cache_key, $rows, self::POST_VISITS_CACHE_GROUP, absint( apply_filters( 'pvc_visits_object_cache_expire', 300 ) ) );
 		}
 
 		$values = [];
@@ -972,7 +978,9 @@ class Post_Views_Counter_Visits_Query {
 				return [ 'values' => null, 'availability' => $context['availability'], 'error' => 'read_failed' ];
 
 			$rows = $result['value'];
-			wp_cache_add( $cache_key, $rows, self::POST_VISITS_CACHE_GROUP, absint( apply_filters( 'pvc_visits_object_cache_expire', 300 ) ) );
+
+			if ( $result['cacheable'] )
+				wp_cache_add( $cache_key, $rows, self::POST_VISITS_CACHE_GROUP, absint( apply_filters( 'pvc_visits_object_cache_expire', 300 ) ) );
 		}
 
 		$values = [];
@@ -1128,23 +1136,73 @@ class Post_Views_Counter_Visits_Query {
 	}
 
 	/**
+	 * Run one read and keep its own status apart from its rows.
+	 *
+	 * A failed query can return false with no error text and leave the
+	 * previous query's rows in place, so only the statement's own result
+	 * decides. It runs the way wpdb's read wrappers run it: their
+	 * safe-collation check first, which lets a valid read with non-ASCII text
+	 * through on a table whose charset is safe, then `query()`, whose return
+	 * value the wrappers discard. Non-ASCII results are never cached.
+	 *
+	 * @since 1.8.2
+	 *
+	 * @param string $sql Prepared SQL.
+	 * @return array{success:bool,rows:array,cacheable:bool} Rows as associative arrays.
+	 */
+	public static function run_read( $sql ) {
+		global $wpdb;
+
+		$wpdb->last_error = '';
+
+		if ( self::run_read_query( $wpdb, $sql ) === false || $wpdb->last_error !== '' )
+			return [ 'success' => false, 'rows' => [], 'cacheable' => false ];
+
+		$rows = [];
+
+		foreach ( (array) $wpdb->last_result as $row )
+			$rows[] = (array) $row;
+
+		return [ 'success' => true, 'rows' => $rows, 'cacheable' => preg_match( '/[^\x00-\x7F]/', (string) $sql ) !== 1 ];
+	}
+
+	/**
+	 * Run one read as wpdb's read wrappers do and return `query()`'s result.
+	 *
+	 * The wrappers' two steps are protected, so they run in a closure bound to
+	 * the wpdb object. A drop-in without them runs `query()` alone.
+	 *
+	 * @since 1.8.2
+	 *
+	 * @param wpdb   $db Database object.
+	 * @param string $sql Prepared SQL.
+	 * @return int|bool|false The result of `query()`; false on failure.
+	 */
+	private static function run_read_query( $db, $sql ) {
+		$run = function( $sql ) {
+			if ( property_exists( $this, 'check_current_query' ) && method_exists( $this, 'check_safe_collation' ) && $this->check_current_query && $this->check_safe_collation( $sql ) )
+				$this->check_current_query = false;
+
+			return $this->query( $sql );
+		};
+
+		$bound = Closure::bind( $run, $db, get_class( $db ) );
+
+		return $bound ? $bound( $sql ) : $db->query( $sql );
+	}
+
+	/**
 	 * Execute a grouped Visit read without turning database failure into zero.
 	 *
 	 * @since 1.7.16
 	 *
 	 * @param string $sql Prepared SQL.
-	 * @return array{success:bool,value:array}
+	 * @return array{success:bool,value:array,cacheable:bool}
 	 */
 	private static function get_rows_result( $sql ) {
-		global $wpdb;
+		$read = self::run_read( $sql );
 
-		$wpdb->last_error = '';
-		$rows = $wpdb->get_results( $sql, ARRAY_A );
-
-		if ( $wpdb->last_error !== '' )
-			return [ 'success' => false, 'value' => [] ];
-
-		return [ 'success' => true, 'value' => is_array( $rows ) ? $rows : [] ];
+		return [ 'success' => $read['success'], 'value' => $read['rows'], 'cacheable' => $read['cacheable'] ];
 	}
 
 	/**
@@ -1153,18 +1211,17 @@ class Post_Views_Counter_Visits_Query {
 	 * @since 1.7.16
 	 *
 	 * @param string $sql Prepared SQL.
-	 * @return array{success:bool,value:int}
+	 * @return array{success:bool,value:int,cacheable:bool}
 	 */
 	public static function get_scalar_result( $sql ) {
-		global $wpdb;
+		$read = self::run_read( $sql );
 
-		$wpdb->last_error = '';
-		$value = $wpdb->get_var( $sql );
+		if ( ! $read['success'] )
+			return [ 'success' => false, 'value' => 0, 'cacheable' => false ];
 
-		if ( $wpdb->last_error !== '' )
-			return [ 'success' => false, 'value' => 0 ];
+		$value = isset( $read['rows'][0] ) ? reset( $read['rows'][0] ) : null;
 
-		return [ 'success' => true, 'value' => $value === null ? 0 : (int) $value ];
+		return [ 'success' => true, 'value' => $value === null || $value === false ? 0 : (int) $value, 'cacheable' => $read['cacheable'] ];
 	}
 
 	/**
@@ -1246,7 +1303,11 @@ class Post_Views_Counter_Visits_Query {
 		if ( function_exists( 'wp_cache_supports' ) && wp_cache_supports( 'flush_group' ) ) {
 			$flushed = true;
 
-			foreach ( [ self::VISITS_CACHE_GROUP, self::POST_VISITS_CACHE_GROUP, self::VIEWS_PER_VISIT_CACHE_GROUP ] as $group )
+			// The Views paired with Visits are keyed by the generation this
+			// fallback could not advance, so their groups go too, Core's and the
+			// extension's term series alike; a later request starting again at
+			// generation zero would otherwise match a stale Views key.
+			foreach ( [ self::VISITS_CACHE_GROUP, self::POST_VISITS_CACHE_GROUP, self::VIEWS_PER_VISIT_CACHE_GROUP, 'pvc-get_views', 'pvc-get_term_views_query' ] as $group )
 				$flushed = wp_cache_flush_group( $group ) && $flushed;
 		}
 

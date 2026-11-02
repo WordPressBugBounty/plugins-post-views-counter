@@ -2083,6 +2083,10 @@ class Post_Views_Counter_Import {
 
 		$message .= ' ' . sprintf( __( 'Support reference: %s.', 'post-views-counter' ), $error_code );
 
+		// part of the import may have committed before it stopped, so nothing
+		// cached before it may answer for the stored counts
+		$this->flush_pvc_caches();
+
 		$this->log_import_diagnostics();
 
 		return [
@@ -2416,6 +2420,13 @@ class Post_Views_Counter_Import {
 	 */
 	private function flush_pvc_caches() {
 		global $wp_object_cache;
+
+		// Imported Views change what the Visits-keyed reads pair with them,
+		// such as the Views-per-visit numerator, so the Visits generation that
+		// keys those caches advances too, with any persistent cache.
+		if ( class_exists( 'Post_Views_Counter_Visits_Query' ) ) {
+			Post_Views_Counter_Visits_Query::invalidate_read_cache();
+		}
 
 		if ( ! is_object( $wp_object_cache ) || ! property_exists( $wp_object_cache, 'cache' ) ) {
 			return;

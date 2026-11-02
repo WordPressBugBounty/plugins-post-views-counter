@@ -280,14 +280,39 @@ if ( ! function_exists( 'pvc_get_post_views' ) ) {
 
 		// cached data not found?
 		if ( $post_views === false ) {
-			// get post views
-			$post_views = (int) $wpdb->get_var( $query );
+			// get post views; a failed query can return false with no error text,
+			// so plain ASCII SQL is run directly to keep its status, and any other
+			// SQL keeps the wrapper's own charset handling but is never cached
+			$wpdb->last_error = '';
 
-			// set the cache expiration, 5 minutes by default
-			$expire = absint( apply_filters( 'pvc_object_cache_expire', 300 ) );
+			if ( preg_match( '/[^\x00-\x7F]/', $query ) ) {
+				$post_views = (int) $wpdb->get_var( $query );
+				$cacheable = false;
+			} else {
+				$cacheable = $wpdb->query( $query ) !== false;
+				$post_views = $cacheable ? (int) $wpdb->get_var( null ) : 0;
+			}
 
-			// add cached post views
-			wp_cache_add( $query_hash, $post_views, 'pvc-get_post_views', $expire );
+			// a failed query is never cached, so the next call queries again
+			if ( $cacheable && $wpdb->last_error === '' ) {
+				// set the cache expiration, 5 minutes by default
+				$expire = absint( apply_filters( 'pvc_object_cache_expire', 300 ) );
+
+				// add cached post views
+				wp_cache_add( $query_hash, $post_views, 'pvc-get_post_views', $expire );
+			} elseif ( ! preg_match( '/[^\x00-\x7F]/', $query ) ) {
+				/**
+				 * Fires when a post Views read failed and its 0 is not a stored
+				 * total, so a screen that offers the total for editing can show
+				 * it as unavailable instead.
+				 *
+				 * @since 1.8.2
+				 *
+				 * @param int|string $post_id Post ID, or the comma-separated IDs read.
+				 * @param string     $period Period.
+				 */
+				do_action( 'pvc_post_views_read_failed', $post_id, $period );
+			}
 		}
 
 		return (int) apply_filters( 'pvc_get_post_views', $post_views, $post_id, $period, $args );
@@ -675,13 +700,36 @@ if ( ! function_exists( 'pvc_get_views' ) ) {
 
 		$query = apply_filters( 'pvc_get_views_query_sql', $query, $args, $views_query );
 
+		// stored Views are blocked only by the deactivation marker: return the
+		// usual empty shape without reading them
+		if ( isset( Post_Views_Counter()->visits ) && method_exists( Post_Views_Counter()->visits, 'is_site_data_accessible' ) && ! Post_Views_Counter()->visits->is_site_data_accessible() )
+			return apply_filters( 'pvc_get_views', $args['fields'] === 'date=>views' && ! empty( $range ) ? $range : 0 );
+
 		// get cached data
 		$post_views = wp_cache_get( md5( $query ), 'pvc-get_views' );
 
 		// cached data not found?
 		if ( $post_views === false ) {
+			// a failed query can return false with no error text, so the
+			// statement's own result decides: plain ASCII SQL runs directly, and
+			// any other SQL through run_read(), which keeps the wrapper's charset
+			// handling; non-ASCII results are never cached
+			$wpdb->last_error = '';
+			$wrapped = preg_match( '/[^\x00-\x7F]/', $query ) === 1;
+
+			if ( $wrapped ) {
+				$wrapped_read = Post_Views_Counter_Visits_Query::run_read( $query );
+				$read = $wrapped_read['success'];
+			} else
+				$read = $wpdb->query( $query ) !== false && $wpdb->last_error === '';
+
 			if ( $args['fields'] === 'date=>views' && ! empty( $range ) ) {
-				$results = $wpdb->get_results( $query );
+				if ( $wrapped )
+					$results = array_map( function( $row ) {
+						return (object) $row;
+					}, $wrapped_read['rows'] );
+				else
+					$results = $read ? (array) $wpdb->last_result : [];
 
 				if ( ! empty( $results ) ) {
 					foreach ( $results as $row ) {
@@ -691,12 +739,25 @@ if ( ! function_exists( 'pvc_get_views' ) ) {
 
 				$post_views = $range;
 			} else
-				$post_views = (int) $wpdb->get_var( $query );
+				$post_views = $wrapped ? ( isset( $wrapped_read['rows'][0] ) ? (int) reset( $wrapped_read['rows'][0] ) : 0 ) : ( $read ? (int) $wpdb->get_var( null ) : 0 );
 
-			// set the cache expiration, 5 minutes by default
-			$expire = absint( apply_filters( 'pvc_object_cache_expire', 300 ) );
+			// a failed query is never cached, so the next call queries again
+			if ( $read && ! $wrapped ) {
+				// set the cache expiration, 5 minutes by default
+				$expire = absint( apply_filters( 'pvc_object_cache_expire', 300 ) );
 
-			wp_cache_add( md5( $query ), $post_views, 'pvc-get_views', $expire );
+				wp_cache_add( md5( $query ), $post_views, 'pvc-get_views', $expire );
+			} elseif ( ! $read ) {
+				/**
+				 * Fires when a Views read failed and its zeros are not stored
+				 * totals, so a diagnostic can show the read as unavailable.
+				 *
+				 * @since 1.8.2
+				 *
+				 * @param array $args Query arguments.
+				 */
+				do_action( 'pvc_views_read_failed', $args );
+			}
 		}
 
 		return apply_filters( 'pvc_get_views', $post_views );
@@ -793,16 +854,20 @@ if ( ! function_exists( 'pvc_get_visits' ) ) {
 			if ( $values === false ) {
 				$values = [];
 
-				$wpdb->last_error = '';
-				$rows = $wpdb->get_results( $sql );
+				// a failed read, silent or not, is unavailable, never an empty
+				// series or the previous query's rows
+				$read = Post_Views_Counter_Visits_Query::run_read( $sql );
 
-				if ( $wpdb->last_error !== '' )
+				if ( ! $read['success'] )
 					return [ 'values' => [], 'availability' => array_merge( $availability, [ 'readable' => false, 'read_reason' => 'database_error' ] ) ];
 
-				foreach ( (array) $rows as $row )
-					$values[(string) $row->period] = (int) $row->post_visits;
+				foreach ( $read['rows'] as $row ) {
+					if ( isset( $row['period'] ) )
+						$values[(string) $row['period']] = isset( $row['post_visits'] ) ? (int) $row['post_visits'] : 0;
+				}
 
-				wp_cache_add( $cache_key, $values, Post_Views_Counter_Visits_Query::VISITS_CACHE_GROUP, absint( apply_filters( 'pvc_visits_object_cache_expire', 300 ) ) );
+				if ( $read['cacheable'] )
+					wp_cache_add( $cache_key, $values, Post_Views_Counter_Visits_Query::VISITS_CACHE_GROUP, absint( apply_filters( 'pvc_visits_object_cache_expire', 300 ) ) );
 			}
 
 			return apply_filters( 'pvc_get_visits', [ 'values' => $values, 'availability' => $availability ], $args );
@@ -817,7 +882,9 @@ if ( ! function_exists( 'pvc_get_visits' ) ) {
 				return null;
 
 			$value = $result['value'];
-			wp_cache_add( $cache_key, $value, Post_Views_Counter_Visits_Query::VISITS_CACHE_GROUP, absint( apply_filters( 'pvc_visits_object_cache_expire', 300 ) ) );
+
+			if ( $result['cacheable'] )
+				wp_cache_add( $cache_key, $value, Post_Views_Counter_Visits_Query::VISITS_CACHE_GROUP, absint( apply_filters( 'pvc_visits_object_cache_expire', 300 ) ) );
 		}
 
 		return (int) apply_filters( 'pvc_get_visits', (int) $value, $args, $availability );
@@ -870,14 +937,17 @@ if ( ! function_exists( 'pvc_get_views_per_visit' ) ) {
 		$row = wp_cache_get( $cache_key, Post_Views_Counter_Visits_Query::VIEWS_PER_VISIT_CACHE_GROUP );
 
 		if ( $row === false ) {
-			$wpdb->last_error = '';
-			$row = $wpdb->get_row( $sql, ARRAY_A );
+			// a failed read, silent or not, is never cached or taken for this
+			// range's sums
+			$read = Post_Views_Counter_Visits_Query::run_read( $sql );
 
-			if ( $wpdb->last_error !== '' )
+			if ( ! $read['success'] )
 				return null;
 
-			$row = is_array( $row ) ? $row : [ 'views' => 0, 'visits' => 0 ];
-			wp_cache_add( $cache_key, $row, Post_Views_Counter_Visits_Query::VIEWS_PER_VISIT_CACHE_GROUP, absint( apply_filters( 'pvc_visits_object_cache_expire', 300 ) ) );
+			$row = isset( $read['rows'][0] ) ? $read['rows'][0] : [ 'views' => 0, 'visits' => 0 ];
+
+			if ( $read['cacheable'] )
+				wp_cache_add( $cache_key, $row, Post_Views_Counter_Visits_Query::VIEWS_PER_VISIT_CACHE_GROUP, absint( apply_filters( 'pvc_visits_object_cache_expire', 300 ) ) );
 		}
 		$visits = isset( $row['visits'] ) ? (int) $row['visits'] : 0;
 
@@ -1122,9 +1192,12 @@ function pvc_update_post_views( $post_id = 0, $post_views = 0 ) {
 	$post_views = apply_filters( 'pvc_update_post_views_count', $post_views, $post_id );
 
 	// insert or update database post views count
-	$wpdb->query( $wpdb->prepare( "INSERT INTO " . $wpdb->prefix . "post_views (id, type, period, count) VALUES (%d, %d, %s, %d) ON DUPLICATE KEY UPDATE count = %d", $post_id, 4, 'total', $post_views, $post_views ) );
+	$result = $wpdb->query( $wpdb->prepare( "INSERT INTO " . $wpdb->prefix . "post_views (id, type, period, count) VALUES (%d, %d, %s, %d) ON DUPLICATE KEY UPDATE count = %d", $post_id, 4, 'total', $post_views, $post_views ) );
 
 	// query fails only if it returns false
+	if ( $result === false )
+		return false;
+
 	return apply_filters( 'pvc_update_post_views', $post_id );
 }
 

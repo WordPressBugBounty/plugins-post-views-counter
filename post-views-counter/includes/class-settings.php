@@ -41,6 +41,11 @@ class Post_Views_Counter_Settings {
 	public $emails;
 
 	/**
+	 * @var Post_Views_Counter_Settings_Status
+	 */
+	public $status;
+
+	/**
 	 * Class constructor.
 	 *
 	 * @return void
@@ -66,6 +71,7 @@ class Post_Views_Counter_Settings {
 		$this->integrations = new Post_Views_Counter_Settings_Integrations();
 		$this->emails = new Post_Views_Counter_Settings_Emails();
 		$this->other = new Post_Views_Counter_Settings_Other( $this );
+		$this->status = new Post_Views_Counter_Settings_Status( $this );
 	}
 
 	/**
@@ -149,7 +155,8 @@ class Post_Views_Counter_Settings {
 	 * @return void
 	 */
 	public function settings_sidebar( $setting = '', $page_type = '', $url_page = '', $tab_key = 'general' ) {
-		if ( class_exists( 'Post_Views_Counter_Pro' ) ) {
+		// the Status tab has no sidebar, before the unknown-tab fallback below
+		if ( $tab_key === 'status' || class_exists( 'Post_Views_Counter_Pro' ) ) {
 			return;
 		}
 
@@ -274,6 +281,9 @@ class Post_Views_Counter_Settings {
 			'form' => [
 				'reports'	=> [
 					'buttons'	=> false
+				],
+				'status'	=> [
+					'buttons'	=> false
 				]
 			],
 			'option_name' => [
@@ -291,7 +301,8 @@ class Post_Views_Counter_Settings {
 				$this->reports->get_sections(),
 				$this->integrations->get_sections(),
 				$this->emails->get_sections(),
-				$this->other->get_sections()
+				$this->other->get_sections(),
+				$this->status->get_sections()
 			),
 			'fields' => array_merge(
 				$this->general->get_fields(),
@@ -663,6 +674,12 @@ class Post_Views_Counter_Settings {
 					'label'			=> __( 'Other', 'post-views-counter' ),
 					'option_name'	=> 'post_views_counter_settings_other',
 					'use_plugin_title' => true
+				],
+				// no option: the tab saves nothing
+				'status'	=> [
+					'label'			=> __( 'Status', 'post-views-counter' ),
+					'icon'			=> [ $this->status, 'get_tab_icon' ],
+					'use_plugin_title' => true
 				]
 			]
 		];
@@ -743,6 +760,16 @@ class Post_Views_Counter_Settings {
 				'capability'	=> apply_filters( 'pvc_settings_capability', 'manage_options' ),
 				'callback'		=> null
 			];
+
+			$pages['post-views-counter-status'] = [
+				'menu_slug'		=> 'post-views-counter&tab=status',
+				'parent_slug'	=> 'post-views-counter',
+				'type'			=> 'subpage',
+				'page_title'	=> __( 'Status', 'post-views-counter' ),
+				'menu_title'	=> __( 'Status', 'post-views-counter' ),
+				'capability'	=> apply_filters( 'pvc_settings_capability', 'manage_options' ),
+				'callback'		=> null
+			];
 		}
 
 		// Backward compatibility: ensure legacy reports tab exists for older companion versions.
@@ -780,7 +807,8 @@ class Post_Views_Counter_Settings {
 	public function settings_page_class( $class ) {
 		$is_pro = class_exists( 'Post_Views_Counter_Pro' );
 
-		if ( ! $is_pro )
+		// the Status tab has no sidebar
+		if ( ! $is_pro && ! in_array( 'status-settings', (array) $class, true ) )
 			$class[] = 'has-sidebar';
 
 		return $class;

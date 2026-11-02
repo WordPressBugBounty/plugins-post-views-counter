@@ -33,7 +33,7 @@ class Post_Views_Counter_Settings_Other {
 		return [
 			'post_views_counter_other_status' => [
 				'tab'      => 'other',
-				'title'    => __( 'Plugin Status', 'post-views-counter' ),
+				'title'    => __( 'License', 'post-views-counter' ),
 				'callback' => [ $this, 'section_other_status' ]
 			],
 			'post_views_counter_other_import' => [
@@ -283,7 +283,7 @@ class Post_Views_Counter_Settings_Other {
 	 * @return void
 	 */
 	public function section_other_status() {
-		echo '<p class="description">' . esc_html__( 'View license details and other status information.', 'post-views-counter' ) . '</p>';
+		echo '<p class="description">' . esc_html__( 'A license key enables updates and support for Post Views Counter Pro. Counting does not depend on it.', 'post-views-counter' ) . '</p>';
 
 		// render plugin status rows
 		$rows = $this->get_plugin_status_rows();
@@ -359,41 +359,12 @@ class Post_Views_Counter_Settings_Other {
 	 * Rows should be associative arrays with: label, value (string), optional active (bool),
 	 * and optional actions (arrays containing label, href, and class) keys.
 	 * The returned rows will be filtered by 'pvc_plugin_status_rows' which allows extensions to add/modify rows.
+	 * The list starts empty: versions, tables and Visits readiness are on the Status tab.
 	 *
 	 * @return array
 	 */
 	protected function get_plugin_status_rows() {
-		global $wpdb;
-
-		$version = isset( $this->pvc->defaults['version'] ) ? $this->pvc->defaults['version'] : '';
-
-		if ( empty( $version ) ) {
-			$version = esc_html__( 'unknown', 'post-views-counter' );
-		}
-
-		// detect companion plugin activation status
-		$pvc_pro_active = class_exists( 'Post_Views_Counter_Pro' );
-
-		// get companion plugin version
-		$pro_version = $pvc_pro_active ? get_option( 'post_views_counter_pro_version', '1.0.0' ) : '<span class="pvc-status pvc-status-missing">✗</span>';
-
-		// get database tables via filter
-		$tables = $this->get_plugin_status_tables();
-
-		$rows = [
-			[
-				'label' => __( 'Plugin Version', 'post-views-counter' ),
-				'lines' => [ 'Post Views Counter: ' . $version, 'Post Views Counter Pro: ' . $pro_version ]
-			]
-		];
-
-		// add database tables row if any tables are defined
-		if ( ! empty( $tables ) ) {
-			$rows[] = [
-				'label' => __( 'Database Tables', 'post-views-counter' ),
-				'tables' => $tables
-			];
-		}
+		$rows = [];
 
 		/**
 		 * Filter the plugin status rows.
@@ -417,7 +388,7 @@ class Post_Views_Counter_Settings_Other {
 	 *
 	 * @return array
 	 */
-	protected function get_plugin_status_tables() {
+	protected function get_plugin_status_tables( $report_failures = false ) {
 		global $wpdb;
 
 		/**
@@ -448,9 +419,16 @@ class Post_Views_Counter_Settings_Other {
 				continue;
 			}
 
-			// check if table exists
+			// check if table exists; when failures are reported, a failed
+			// check is null, never a missing table
 			$full_table_name = $wpdb->prefix . $table_name;
-			$exists = (bool) $wpdb->get_var( $wpdb->prepare( "SHOW TABLES LIKE %s", $full_table_name ) );
+			$sql = $wpdb->prepare( "SHOW TABLES LIKE %s", $full_table_name );
+
+			if ( $report_failures ) {
+				$check = Post_Views_Counter_Visits_Query::run_read( $sql );
+				$exists = $check['success'] ? ! empty( $check['rows'] ) : null;
+			} else
+				$exists = (bool) $wpdb->get_var( $sql );
 
 			// use provided label or fallback to table name
 			$label = ! empty( $table_def['label'] ) ? $table_def['label'] : $table_name;
@@ -463,6 +441,19 @@ class Post_Views_Counter_Settings_Other {
 		}
 
 		return $validated_tables;
+	}
+
+	/**
+	 * Get the plugin tables for the Status tab: the result of
+	 * get_plugin_status_tables(), whose filter keeps its shape and location,
+	 * with a failed existence check as null rather than a missing table.
+	 *
+	 * @since 1.8.2
+	 *
+	 * @return array
+	 */
+	public function get_status_tables() {
+		return $this->get_plugin_status_tables( true );
 	}
 
 	/**

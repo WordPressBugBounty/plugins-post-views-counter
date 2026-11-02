@@ -330,8 +330,14 @@ class Post_Views_Counter_Settings_API {
 				if ( ! empty( $tab['disabled'] ) )
 					echo '<span class="nav-span-disabled">';
 
+				// An optional icon callback supplies classes and an accessible label.
+				$icon = isset( $tab['icon'] ) && is_callable( $tab['icon'] ) ? call_user_func( $tab['icon'] ) : [];
+				$icon_class = is_array( $icon ) && isset( $icon['class'] ) && is_string( $icon['class'] ) ? $icon['class'] : '';
+				$icon_label = is_array( $icon ) && isset( $icon['label'] ) && is_string( $icon['label'] ) ? $icon['label'] : '';
+				$icon_html = $icon_class !== '' ? '<span class="' . esc_attr( $icon_class ) . '" aria-hidden="true"></span>' : '';
+
 				echo '
-				<a class="nav-tab' . ( $tab_key === $key ? ' nav-tab-active' : '' ) . ( ! empty( $tab['disabled'] ) ? ' nav-tab-disabled' : '' ) . ( ! empty( $tab['class'] ) ? ' ' . esc_attr( $tab['class'] ) : '' ) . '" href="' . ( $url !== '' ? esc_url( $url ) : '#' ) . '">' . esc_html( $tab['label'] ) . '</a>';
+				<a class="nav-tab nav-tab-' . esc_attr( $key ) . ( $tab_key === $key ? ' nav-tab-active' : '' ) . ( ! empty( $tab['disabled'] ) ? ' nav-tab-disabled' : '' ) . ( ! empty( $tab['class'] ) ? ' ' . esc_attr( $tab['class'] ) : '' ) . '" href="' . ( $url !== '' ? esc_url( $url ) : '#' ) . '"' . ( $icon_label !== '' ? ' aria-label="' . esc_attr( $icon_label ) . '"' : '' ) . '>' . $icon_html . esc_html( $tab['label'] ) . '</a>';
 
 				if ( ! empty( $tab['disabled'] ) )
 					echo '</span>';
@@ -445,7 +451,7 @@ class Post_Views_Counter_Settings_API {
 
 			submit_button( '', 'primary save-' . $setting_hyphenated, 'save_' . $setting, false, [ 'id' => 'save-' . $setting_hyphenated ] );
 
-			submit_button( __( 'Reset to defaults', $this->domain ), 'outline reset_pvc_settings ' . $legacy_reset_class . ' reset-' . $setting_hyphenated, 'reset_' . $setting, false, [ 'id' => 'reset-' . $setting_hyphenated ] );
+			submit_button( __( 'Reset to defaults', 'post-views-counter' ), 'outline reset_pvc_settings ' . $legacy_reset_class . ' reset-' . $setting_hyphenated, 'reset_' . $setting, false, [ 'id' => 'reset-' . $setting_hyphenated ] );
 
 			echo '
 					</p>
@@ -879,7 +885,7 @@ class Post_Views_Counter_Settings_API {
 				// Text input for the hex color value.
 				$html .= '<input id="' . $input_id . '" type="text" name="' . $color_name . '" value="' . $color_value . '" class="' . $input_class . '" />';
 				// Swatch button to toggle the picker.
-				$html .= '<button type="button" class="' . $this->prefix . '-color-swatch"' . $swatch_style . ' aria-label="' . esc_attr__( 'Open color picker', $this->domain ) . '" aria-expanded="false"></button>';
+				$html .= '<button type="button" class="' . $this->prefix . '-color-swatch"' . $swatch_style . ' aria-label="' . esc_attr__( 'Open color picker', 'post-views-counter' ) . '" aria-expanded="false"></button>';
 				// Vanilla-colorful picker (hidden by default).
 				$html .= '<div class="' . $this->prefix . '-color-popover" aria-hidden="true"><hex-color-picker class="' . $this->prefix . '-hex-color-picker" color="' . $color_value . '"></hex-color-picker></div>';
 				$html .= '</div>';
@@ -1130,7 +1136,7 @@ class Post_Views_Counter_Settings_API {
 			$license_notices = function_exists( 'get_settings_errors' ) ? get_settings_errors( 'validate_license' ) : [];
 
 			if ( empty( $license_notices ) )
-				add_settings_error( $setting_name, 'settings_saved', __( 'Settings saved.', $this->domain ), 'updated' );
+				add_settings_error( $setting_name, 'settings_saved', __( 'Settings saved.', 'post-views-counter' ), 'updated' );
 		// reset settings
 		} elseif ( isset( $_POST['reset_' . $setting_name] ) ) {
 			// get default values
@@ -1160,7 +1166,7 @@ class Post_Views_Counter_Settings_API {
 			$license_notices = function_exists( 'get_settings_errors' ) ? get_settings_errors( 'reset_license' ) : [];
 
 			if ( empty( $license_notices ) )
-				add_settings_error( $setting_name, 'settings_restored', __( 'Settings restored to defaults.', $this->domain ), 'updated' );
+				add_settings_error( $setting_name, 'settings_restored', __( 'Settings restored to defaults.', 'post-views-counter' ), 'updated' );
 		}
 
 		do_action( $this->prefix . '_configuration_updated', 'settings', $input );

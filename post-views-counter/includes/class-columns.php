@@ -12,6 +12,12 @@ class Post_Views_Counter_Columns {
 
 	private $bulk_counter_result = null;
 
+	/** @var array Post IDs whose single-object Views write failed in this request. */
+	private $counter_write_failures = [];
+
+	/** @var array Post IDs whose lifetime Views read failed in this request. */
+	private $failed_views_reads = [];
+
 	/**
 	 * Class constructor.
 	 *
@@ -31,8 +37,59 @@ class Post_Views_Counter_Columns {
 		add_action( 'wp_ajax_save_bulk_post_views', [ $this, 'save_bulk_post_views' ] );
 		add_action( 'bulk_edit_posts', [ $this, 'bulk_edit_post_counters' ], 10, 2 );
 		add_action( 'admin_notices', [ $this, 'bulk_counter_admin_notice' ] );
+		add_action( 'admin_notices', [ $this, 'counter_write_admin_notice' ] );
+		add_action( 'pvc_post_views_read_failed', [ $this, 'note_failed_views_read' ], 10, 2 );
 		add_filter( 'removable_query_args', [ $this, 'add_removable_query_args' ] );
 		add_action( 'pre_get_posts', [ $this, 'prepare_admin_list_sort' ], 0 );
+	}
+
+	/**
+	 * The largest counter total an editor accepts: the largest whole number
+	 * the block editor holds exactly (2^53 - 1).
+	 */
+	const MAX_COUNTER_TOTAL = '9007199254740991';
+
+	/**
+	 * Parse one whole-number counter total, bounded before it is cast so an
+	 * oversized value never saturates or loses digits. A negative value means
+	 * zero.
+	 *
+	 * @param string $value Decimal digits with an optional minus sign.
+	 * @return int|null Null when the value is not a whole number or exceeds MAX_COUNTER_TOTAL.
+	 */
+	public static function parse_counter_total( $value ) {
+		if ( ! is_string( $value ) || ! preg_match( '/^-?\d+$/', $value ) )
+			return null;
+
+		if ( $value[0] === '-' )
+			return 0;
+
+		$digits = ltrim( $value, '0' );
+
+		if ( strlen( $digits ) > strlen( self::MAX_COUNTER_TOTAL ) || ( strlen( $digits ) === strlen( self::MAX_COUNTER_TOTAL ) && strcmp( $digits, self::MAX_COUNTER_TOTAL ) > 0 ) )
+			return null;
+
+		return (int) $digits;
+	}
+
+	/**
+	 * Get one whole-number counter total in canonical decimal form, without
+	 * casting it, so totals of any size compare exactly.
+	 *
+	 * @param mixed $value Submitted value.
+	 * @return string|null Digits without leading zeros ("0" for a negative
+	 *                     value), or null when the value is not a whole number.
+	 */
+	private function get_canonical_counter_total( $value ) {
+		if ( ! is_scalar( $value ) )
+			return null;
+
+		$value = trim( wp_unslash( (string) $value ) );
+
+		if ( ! preg_match( '/^-?\d+$/', $value ) )
+			return null;
+
+		return $value[0] === '-' ? '0' : ( ltrim( $value, '0' ) === '' ? '0' : ltrim( $value, '0' ) );
 	}
 
 	/**
@@ -45,14 +102,7 @@ class Post_Views_Counter_Columns {
 		if ( ! is_scalar( $value ) )
 			return null;
 
-		$value = trim( wp_unslash( (string) $value ) );
-
-		if ( $value === '' || ! preg_match( '/^-?\d+$/', $value ) )
-			return null;
-
-		$count = (int) $value;
-
-		return $count < 0 ? 0 : $count;
+		return self::parse_counter_total( trim( wp_unslash( (string) $value ) ) );
 	}
 
 	/**
@@ -77,15 +127,18 @@ class Post_Views_Counter_Columns {
 		if ( trim( wp_unslash( (string) $source['post_views'] ) ) === '' )
 			return [];
 
+		// A value equal to the one the form was loaded with was not edited.
+		// Writing it back would roll back Views counted since then. Compared
+		// before the bound, so an unchanged total above it is no edit either.
+		$submitted = $this->get_canonical_counter_total( $source['post_views'] );
+
+		if ( $submitted !== null && array_key_exists( 'current_post_views', $source ) && $this->get_canonical_counter_total( $source['current_post_views'] ) === $submitted )
+			return [];
+
 		$value = $this->sanitize_counter_total_input( $source['post_views'] );
 
 		if ( is_null( $value ) )
 			return null;
-
-		// A value equal to the one the form was loaded with was not edited.
-		// Writing it back would roll back Views counted since then.
-		if ( array_key_exists( 'current_post_views', $source ) && $this->sanitize_counter_total_input( $source['current_post_views'] ) === $value )
-			return [];
 
 		return [ 'views' => $value ];
 	}
@@ -137,13 +190,15 @@ class Post_Views_Counter_Columns {
 	 * @internal Shared by the Classic Editor and the block editor.
 	 *
 	 * @param int $post_id Post ID.
-	 * @return array
+	 * @return array The committed total the save compares with (views, null
+	 *               when it cannot be read, never 0) and whether the current
+	 *               user may edit it (editable).
 	 */
 	public function get_post_editor_counter_state( $post_id ) {
 		$post_id = (int) $post_id;
 
 		return [
-			'views'		=> (int) pvc_get_post_views( $post_id ),
+			'views'		=> $this->get_stored_post_views_total( $post_id ),
 			'editable'	=> $this->can_edit_post_counter_in_editor( $post_id )
 		];
 	}
@@ -176,15 +231,38 @@ class Post_Views_Counter_Columns {
 		if ( ! $this->update_post_counter_totals( $post_id, $updates ) )
 			return new WP_Error( 'pvc-counter-write-failed', __( 'The counter totals could not be saved.', 'post-views-counter' ), [ 'status' => 500 ] );
 
+		// the committed total, never one pvc_get_post_views() cached before the write
 		$state = $this->get_post_editor_counter_state( $post_id );
 
-		// pvc_get_post_views() may still hold the total it cached before the write
-		$views = $this->get_stored_post_views_total( $post_id );
-
-		if ( $views === null )
+		if ( $state['views'] === null )
 			return new WP_Error( 'pvc-counter-read-failed', __( 'The saved counter totals could not be read back.', 'post-views-counter' ), [ 'status' => 500 ] );
 
-		$state['views'] = $views;
+		return $state;
+	}
+
+	/**
+	 * Read the committed counter totals for the block editor, which checks a
+	 * write it could not confirm this way before writing again.
+	 *
+	 * @internal Used only by the block editor REST route.
+	 *
+	 * @param int $post_id Post ID.
+	 * @return array|WP_Error Committed totals, the reason nothing is answered,
+	 *                        or pvc-counter-read-failed when the read failed.
+	 */
+	public function read_editor_counter_totals( $post_id ) {
+		$post_id = (int) $post_id;
+
+		if ( ! $this->is_post_counter_visible_in_editor( $post_id ) )
+			return new WP_Error( 'pvc-invalid-post', __( 'Invalid post ID.', 'post-views-counter' ), [ 'status' => 404 ] );
+
+		if ( ! $this->can_edit_post_counter_in_editor( $post_id ) )
+			return new WP_Error( 'pvc-user-not-allowed', __( 'You are not allowed to edit this item.', 'post-views-counter' ), [ 'status' => rest_authorization_required_code() ] );
+
+		$state = $this->get_post_editor_counter_state( $post_id );
+
+		if ( $state['views'] === null )
+			return new WP_Error( 'pvc-counter-read-failed', __( 'The Views total could not be read.', 'post-views-counter' ), [ 'status' => 500 ] );
 
 		return $state;
 	}
@@ -207,10 +285,15 @@ class Post_Views_Counter_Columns {
 		}
 
 		$wpdb->last_error = '';
-		$count = $wpdb->get_var( $wpdb->prepare( 'SELECT `count` FROM `' . $wpdb->prefix . 'post_views`' . $where, $args ) );
+		$result = $wpdb->query( $wpdb->prepare( 'SELECT `count` FROM `' . $wpdb->prefix . 'post_views`' . $where, $args ) );
 
-		// a failed read must never pass for a stored zero
-		return $wpdb->last_error === '' ? (int) $count : null;
+		// A failed read must never pass for a stored zero or an earlier result:
+		// a lost connection returns false with no error text and leaves the
+		// previous query's rows in place.
+		if ( $result === false || $wpdb->last_error !== '' )
+			return null;
+
+		return (int) $wpdb->get_var( null );
 	}
 
 	/**
@@ -360,11 +443,16 @@ class Post_Views_Counter_Columns {
 		<div class="misc-pub-section" id="post-views">
 
 			<span id="post-views-display" class="pvc-editor-counter-line">
-				<?php echo esc_html__( 'Views', 'post-views-counter' ) . ': <b>' . esc_html( number_format_i18n( $state['views'] ) ) . '</b>'; ?>
+				<?php echo esc_html__( 'Views', 'post-views-counter' ) . ': <b>' . esc_html( $state['views'] === null ? __( 'Unavailable', 'post-views-counter' ) : number_format_i18n( $state['views'] ) ) . '</b>'; ?>
 			</span>
 
 			<?php
-			if ( $state['editable'] ) {
+			// a failed read is shown as unavailable, never offered as an editable zero
+			if ( $state['views'] === null ) {
+				?>
+				<p class="description"><?php esc_html_e( 'The Views total could not be read. Reload the page to try again.', 'post-views-counter' ); ?></p>
+				<?php
+			} elseif ( $state['editable'] ) {
 				wp_nonce_field( 'post_views_count', 'pvc_nonce' );
 				?>
 				<a href="#post-views" class="edit-post-views hide-if-no-js" role="button"><?php esc_html_e( 'Edit', 'post-views-counter' ); ?><span class="screen-reader-text"> <?php esc_html_e( 'Views', 'post-views-counter' ); ?></span></a>
@@ -455,14 +543,68 @@ class Post_Views_Counter_Columns {
 
 		$updates = $this->get_submitted_counter_totals();
 
-		if ( is_null( $updates ) || empty( $updates ) )
+		if ( is_array( $updates ) && empty( $updates ) )
 			return;
 
 		// Quick Edit belongs to the list column; the edit screen does not.
 		if ( $this->is_quick_edit_request() ? ! $this->can_update_post_counter_totals( $post_id ) : ! $this->can_edit_post_counter_in_editor( $post_id ) )
 			return;
 
-		$this->update_post_counter_totals( $post_id, $updates );
+		// a malformed value is not saved either
+		if ( is_null( $updates ) || ! $this->update_post_counter_totals( $post_id, $updates ) )
+			$this->report_counter_write_failure( $post_id );
+	}
+
+	/**
+	 * Record a failed single-object Views write. The post's other changes are
+	 * saved, so only the Views total is reported: in the row a Quick Edit save
+	 * returns, or after the edit screen's redirect.
+	 *
+	 * @param int $post_id Post ID.
+	 * @return void
+	 */
+	private function report_counter_write_failure( $post_id ) {
+		$this->counter_write_failures[ (int) $post_id ] = true;
+
+		if ( ! $this->is_quick_edit_request() )
+			add_filter( 'redirect_post_location', [ $this, 'add_counter_write_redirect_arg' ], 10, 2 );
+	}
+
+	/**
+	 * Carry a failed Views write into the edit screen's redirect, naming the
+	 * post it belongs to.
+	 *
+	 * @param string $location Redirect location.
+	 * @param int    $post_id Post ID.
+	 * @return string
+	 */
+	public function add_counter_write_redirect_arg( $location, $post_id = 0 ) {
+		if ( ! is_string( $location ) || $location === '' || empty( $this->counter_write_failures[ (int) $post_id ] ) )
+			return $location;
+
+		return add_query_arg( 'pvc_counter_failed', (int) $post_id, $location );
+	}
+
+	/**
+	 * Report a failed Views write on the edit screen of the post it belongs to.
+	 *
+	 * @global string $pagenow
+	 *
+	 * @return void
+	 */
+	public function counter_write_admin_notice() {
+		global $pagenow;
+
+		if ( $pagenow !== 'post.php' || ! isset( $_GET['pvc_counter_failed'], $_GET['post'] ) || ! is_scalar( $_GET['pvc_counter_failed'] ) || ! is_scalar( $_GET['post'] ) )
+			return;
+
+		$failed = absint( wp_unslash( $_GET['pvc_counter_failed'] ) );
+
+		// a marker carried to, or copied onto, another post's screen says nothing
+		if ( $failed < 1 || $failed !== absint( wp_unslash( $_GET['post'] ) ) )
+			return;
+
+		echo '<div class="notice notice-error is-dismissible"><p>' . esc_html__( 'The Views total could not be saved. Your other changes were saved.', 'post-views-counter' ) . '</p></div>';
 	}
 
 	/**
@@ -666,7 +808,15 @@ class Post_Views_Counter_Columns {
 			}
 
 			// get total post views
+			unset( $this->failed_views_reads[ (int) $id ] );
 			$count = (int) pvc_get_post_views( $id );
+
+			// a failed read is unavailable, so Quick Edit is offered no total;
+			// a failed write is still reported beside it
+			if ( isset( $this->failed_views_reads[ (int) $id ] ) ) {
+				echo $this->get_unavailable_metric_markup() . $this->get_counter_write_failure_markup( $id );
+				return;
+			}
 
 			// get post title
 			$post_title = get_the_title( $id );
@@ -686,8 +836,22 @@ class Post_Views_Counter_Columns {
 				$post_title = $post_type_labels->singular_name . ': ' . $post_title;
 			}
 
-			echo $this->get_column_metric_markup( $count, $id, $post_title, $this->current_user_can_view_post_chart( $id ) );
+			echo $this->get_column_metric_markup( $count, $id, $post_title, $this->current_user_can_view_post_chart( $id ) ) . $this->get_counter_write_failure_markup( $id );
 		}
+	}
+
+	/**
+	 * Render the message the row a Quick Edit save returns carries when that
+	 * save's Views write failed.
+	 *
+	 * @param int $post_id Post ID.
+	 * @return string Empty when the write did not fail.
+	 */
+	private function get_counter_write_failure_markup( $post_id ) {
+		if ( empty( $this->counter_write_failures[ (int) $post_id ] ) )
+			return '';
+
+		return '<p class="pvc-counter-write-failed" role="alert">' . esc_html__( 'Views could not be saved.', 'post-views-counter' ) . '</p>';
 	}
 
 	/**
@@ -746,6 +910,28 @@ class Post_Views_Counter_Columns {
 	 */
 	private function get_restricted_metric_markup() {
 		return '<span class="pvc-column-metric-value"><span aria-hidden="true">&mdash;</span><span class="screen-reader-text"> ' . esc_html__( 'View statistics are restricted.', 'post-views-counter' ) . '</span></span>';
+	}
+
+	/**
+	 * Render the admin column value of a total that could not be read. It
+	 * carries no machine-readable total, so Quick Edit offers none.
+	 *
+	 * @return string
+	 */
+	private function get_unavailable_metric_markup() {
+		return '<span class="pvc-column-metric-value pvc-column-metric-unavailable"><span aria-hidden="true">&mdash;</span><span class="screen-reader-text"> ' . esc_html__( 'The Views total could not be read.', 'post-views-counter' ) . '</span></span>';
+	}
+
+	/**
+	 * Remember a post whose lifetime Views read failed in this request.
+	 *
+	 * @param int|string $post_id Post ID, or the comma-separated IDs read.
+	 * @param string     $period Period.
+	 * @return void
+	 */
+	public function note_failed_views_read( $post_id, $period = 'total' ) {
+		if ( is_int( $post_id ) && $post_id > 0 && $period === 'total' )
+			$this->failed_views_reads[ $post_id ] = true;
 	}
 
 	/**
@@ -949,6 +1135,7 @@ class Post_Views_Counter_Columns {
 
 		$args[] = 'pvc_counters_updated';
 		$args[] = 'pvc_counters_failed';
+		$args[] = 'pvc_counter_failed';
 
 		return $args;
 	}

@@ -284,6 +284,11 @@ class Post_Views_Counter_Counter {
 
 		$visit_increment = 0;
 
+		// The period buckets follow the moment the Visit is decided, so a request
+		// that stalls past midnight while a recovery completes cannot file its
+		// Views-only count under a day that starts after the new boundary.
+		$event_time = current_time( 'timestamp', $pvc->options['general']['count_time'] === 'gmt' );
+
 		if ( ! $views_only && $this->window_created_candidate ) {
 			$availability = $pvc->visits instanceof Post_Views_Counter_Visits ? $pvc->visits->get_visits_availability() : [ 'writable' => false ];
 
@@ -299,7 +304,7 @@ class Post_Views_Counter_Counter {
 			// before count visit action
 			do_action( 'pvc_before_count_visit', $post_id, $user_id, $user_ip, 'post', $hook_content_data );
 
-			$result = $this->count_visit( $post_id, $visit_increment );
+			$result = $this->count_visit( $post_id, $visit_increment, $event_time );
 
 			if ( $result !== null ) {
 				if ( $views_only )
@@ -470,9 +475,19 @@ class Post_Views_Counter_Counter {
 	 * @return void
 	 */
 	public function check_post_js() {
-		// check conditions
-		if ( ! isset( $_POST['action'], $_POST['id'], $_POST['storage_type'], $_POST['storage_data'], $_POST['pvc_nonce'] ) || ! wp_verify_nonce( $_POST['pvc_nonce'], 'pvc-check-post' ) )
-			exit;
+		// This counting action is public (registered for nopriv requests), so no nonce is
+		// checked. Under default anonymous nonce handling, the nonce printed into
+		// page-cached markup is the same for every anonymous visitor and outlives its
+		// lifetime there. Validation relies on the post, storage and counting-condition
+		// checks below. A logged-in visitor is still identified by their auth cookie, so
+		// their exclusions apply, but the action intentionally gives up protection
+		// against cross-site requests that count a view on their behalf.
+		// a named refusal, before counting, so a delivery check can tell that a request reached the plugin
+		if ( ! isset( $_POST['action'], $_POST['id'], $_POST['storage_type'], $_POST['storage_data'] ) )
+			wp_send_json_error( [
+				'code' => 'pvc_missing_parameters',
+				'message' => __( 'Missing counting parameters.', 'post-views-counter' )
+			], 400 );
 
 		// get post id
 		$post_id = (int) $_POST['id'];
@@ -2157,12 +2172,13 @@ class Post_Views_Counter_Counter {
 	 *   `pvc_before_count_visit` and `pvc_after_count_visit` all keep that older
 	 *   meaning and are unchanged public contracts.
 	 *
-	 * @param int $post_id Post ID.
-	 * @param int $visit_increment Visit delta for this event; 0 for Views-only.
+	 * @param int      $post_id Post ID.
+	 * @param int      $visit_increment Visit delta for this event; 0 for Views-only.
+	 * @param int|null $event_time Counting-clock timestamp of the Visit decision; now when null.
 	 *
 	 * @return int|null Post ID on success, null when the write did not succeed.
 	 */
-	private function count_visit( $post_id, $visit_increment = 0 ) {
+	private function count_visit( $post_id, $visit_increment = 0, $event_time = null ) {
 		// increment amount
 		$view_increment = (int) apply_filters( 'pvc_views_increment_amount', 1, $post_id, 'post' );
 
@@ -2170,7 +2186,7 @@ class Post_Views_Counter_Counter {
 			$view_increment = 1;
 
 		// get day, week, month and year
-		$date = explode( '-', date( 'W-d-m-Y-o', current_time( 'timestamp', Post_Views_Counter()->options['general']['count_time'] === 'gmt' ) ) );
+		$date = explode( '-', date( 'W-d-m-Y-o', $event_time !== null ? (int) $event_time : current_time( 'timestamp', Post_Views_Counter()->options['general']['count_time'] === 'gmt' ) ) );
 
 		// prepare count data
 		$count_data = [
@@ -2481,6 +2497,24 @@ class Post_Views_Counter_Counter {
 	}
 
 	/**
+	 * The extended writer that owns the object-cache queue and its flush in
+	 * place of this counter; null when this counter owns them.
+	 *
+	 * @return object|null
+	 */
+	public function get_extended_writer() {
+		if ( ! function_exists( 'Post_Views_Counter_Pro' ) )
+			return null;
+
+		$pro = Post_Views_Counter_Pro();
+
+		if ( is_object( $pro ) && isset( $pro->counter ) && is_object( $pro->counter ) && $pro->counter !== $this && method_exists( $pro->counter, 'flush_cache_to_db' ) )
+			return $pro->counter;
+
+		return null;
+	}
+
+	/**
 	 * Flush views data stored in the persistent object cache into
 	 * our custom table and clear the object cache keys when done.
 	 *
@@ -2490,14 +2524,12 @@ class Post_Views_Counter_Counter {
 		// The extended writer owns the four-part shared-row queue and its Visit
 		// companion. Keep existing base update/email preflight callers compatible by delegating
 		// through the active writer rather than parsing extended keys as base keys.
-		if ( function_exists( 'Post_Views_Counter_Pro' ) ) {
-			$pro = Post_Views_Counter_Pro();
+		$writer = $this->get_extended_writer();
 
-			if ( is_object( $pro ) && isset( $pro->counter ) && is_object( $pro->counter ) && $pro->counter !== $this && method_exists( $pro->counter, 'flush_cache_to_db' ) ) {
-				$result = $pro->counter->flush_cache_to_db( 'pvc' );
-				$this->last_cache_flush_status = method_exists( $pro->counter, 'get_cache_flush_status' ) ? $pro->counter->get_cache_flush_status() : ( $result ? 'completed' : 'failed' );
-				return $result;
-			}
+		if ( $writer !== null ) {
+			$result = $writer->flush_cache_to_db( 'pvc' );
+			$this->last_cache_flush_status = method_exists( $writer, 'get_cache_flush_status' ) ? $writer->get_cache_flush_status() : ( $result ? 'completed' : 'failed' );
+			return $result;
 		}
 
 		$lock_token = $this->acquire_core_flush_lock();
@@ -2826,7 +2858,9 @@ class Post_Views_Counter_Counter {
 
 		$visits = Post_Views_Counter()->visits;
 
-		if ( ! $visits instanceof Post_Views_Counter_Visits || ! $visits->is_current_normal_state_raw( $state ) || serialize( $state ) !== $raw )
+		// a countable repair-fenced state is accepted too: queued Views drain
+		// while Visits wait for the state to recover
+		if ( ! $visits instanceof Post_Views_Counter_Visits || ! $visits->is_current_normal_state_raw( $state, true ) || serialize( $state ) !== $raw )
 			return false;
 
 		return $state['queue_generation'];
@@ -2951,8 +2985,16 @@ class Post_Views_Counter_Counter {
 		$token = wp_generate_uuid4();
 		$lock = [ 'token' => $token, 'expires_at' => time() + max( 30, absint( apply_filters( 'pvc_core_flush_lock_ttl', 300 ) ) ) ];
 
-		if ( add_option( $name, $lock, '', false ) )
+		// insert-only: add_option() upserts after its existence check, so a
+		// rival that created the lock in between would lose it to this request
+		// and both would drain
+		$created = Post_Views_Counter()->visits->insert_option_if_missing( $name, $lock );
+
+		if ( $created === 1 )
 			return $token;
+
+		if ( $created === false )
+			return false;
 
 		$current = get_option( $name, [] );
 
@@ -3562,9 +3604,13 @@ class Post_Views_Counter_Counter {
 		$rows = wp_cache_get( $cache_key, 'pvc-get_post_views' );
 
 		if ( $rows === false ) {
-			$rows = $wpdb->get_results( $sql, ARRAY_A );
-			$rows = is_array( $rows ) ? $rows : [];
-			wp_cache_add( $cache_key, $rows, 'pvc-get_post_views', absint( apply_filters( 'pvc_object_cache_expire', 300 ) ) );
+			// a failed read, silent or not, is never cached, so the next call
+			// reads again instead of serving zeros
+			$read = Post_Views_Counter_Visits_Query::run_read( $sql );
+			$rows = $read['rows'];
+
+			if ( $read['success'] && $read['cacheable'] )
+				wp_cache_add( $cache_key, $rows, 'pvc-get_post_views', absint( apply_filters( 'pvc_object_cache_expire', 300 ) ) );
 		}
 
 		$values = array_fill_keys( $ids, 0 );

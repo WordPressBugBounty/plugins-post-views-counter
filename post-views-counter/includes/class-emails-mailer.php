@@ -257,9 +257,10 @@ class Post_Views_Counter_Emails_Mailer {
 		$current_lock = get_option( $lock['key'], [] );
 		$current_expires_at = $this->get_send_lock_expires_at( $current_lock );
 
-		if ( $current_expires_at <= time() ) {
-			delete_option( $lock['key'] );
-
+		// take over an expired lock only by deleting the exact row read: a
+		// request that took it over meanwhile keeps its lock, and this one
+		// then fails to create its own
+		if ( $current_expires_at <= time() && Post_Views_Counter()->visits->delete_option_if_unchanged( $lock['key'], $current_lock ) ) {
 			if ( $this->add_send_lock( $lock ) )
 				return $lock;
 		}
@@ -282,7 +283,8 @@ class Post_Views_Counter_Emails_Mailer {
 		if ( ! is_array( $current_lock ) || empty( $current_lock['token'] ) || $current_lock['token'] !== $lock['token'] )
 			return;
 
-		delete_option( $lock['key'] );
+		// a lock taken over since it was read is not this request's to delete
+		Post_Views_Counter()->visits->delete_option_if_unchanged( $lock['key'], $current_lock );
 	}
 
 	/**
@@ -358,13 +360,15 @@ class Post_Views_Counter_Emails_Mailer {
 	}
 
 	/**
-	 * Persist a lock payload atomically.
+	 * Persist a lock payload atomically: insert-only, because add_option()
+	 * upserts after its existence check, so a rival that created the lock in
+	 * between would lose it and both would send.
 	 *
 	 * @param array $lock
 	 * @return bool
 	 */
 	private function add_send_lock( $lock ) {
-		return ! empty( $lock['key'] ) && isset( $lock['value'] ) ? add_option( $lock['key'], $lock['value'], '', false ) : false;
+		return ! empty( $lock['key'] ) && isset( $lock['value'] ) ? Post_Views_Counter()->visits->insert_option_if_missing( $lock['key'], $lock['value'] ) === 1 : false;
 	}
 
 	/**
