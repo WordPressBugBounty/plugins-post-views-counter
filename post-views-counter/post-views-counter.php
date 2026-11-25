@@ -2,7 +2,7 @@
 /*
 Plugin Name: Post Views Counter
 Description: Count and display post views, track site-wide visits, and see what content works – inside WordPress. Fast, easy to use and privacy-first.
-Version: 1.8.2
+Version: 1.8.3
 Author: dFactory
 Author URI: https://dfactory.co/
 Plugin URI: https://postviewscounter.com/
@@ -32,7 +32,7 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 	 * Post Views Counter final class.
 	 *
 	 * @class Post_Views_Counter
-	 * @version	1.8.2
+	 * @version	1.8.3
 	 */
 	final class Post_Views_Counter {
 
@@ -147,7 +147,7 @@ if ( ! class_exists( 'Post_Views_Counter' ) ) {
 				],
 				'schedule_version'		=> 1
 			],
-			'version'	=> '1.8.2'
+			'version'	=> '1.8.3'
 		];
 
 		// instances

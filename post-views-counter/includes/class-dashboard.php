@@ -1320,7 +1320,10 @@ class Post_Views_Counter_Dashboard {
 			explode( ' ', date( 'm F Y', strtotime( '+1 months', $timestamp ) ) )
 		];
 
-		$current = date( 'Ym', current_time( 'timestamp', false ) );
+		$timezone = Post_Views_Counter_Visits_Query::get_timezone();
+		// Rebuild from the Unix timestamp: DateTimeImmutable::createFromInterface() requires PHP 8.0, and this file must run on the declared PHP 7.4 floor. Sub-second precision does not affect the 'Ym' comparison below.
+		$current = $this->now ? ( new DateTimeImmutable( '@' . $this->now->getTimestamp() ) )->setTimezone( $timezone ) : new DateTimeImmutable( 'now', $timezone );
+		$current = $current->format( 'Ym' );
 
 		if ( (int) $current <= (int) ( $dates[1][2] . $dates[1][0] ) )
 			$next = '<span class="next">' . $dates[2][1] . ' ' . $dates[2][2] . ' ›</span>';

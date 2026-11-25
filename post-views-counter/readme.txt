@@ -4,7 +4,7 @@ Tags: counter, postviews, statistics, analytics, pageviews
 Requires at least: 6.4
 Requires PHP: 7.4
 Tested up to: 7.2
-Stable tag: 1.8.2
+Stable tag: 1.8.3
 License: MIT
 License URI: http://opensource.org/licenses/MIT
 
@@ -131,6 +131,10 @@ If you’ve purchased Post Views Counter Pro, your license includes one year of 
 2. screenshot-2.png
 
 == Changelog ==
+
+= 1.8.3 =
+* Fix: Restore the shared fixed Visit window for REST API and Fast AJAX browsing across content types. Past totals and Views are unchanged.
+* Fix: Navigate monthly dashboard statistics on the counting clock, so month boundaries match the counted periods.
 
 = 1.8.2 =
 * New: Status tab with counting activity, configuration and data checks, button-triggered delivery checks, and a support report you can copy or download.
@@ -577,5 +581,5 @@ Initial release
 
 == Upgrade Notice ==
 
-= 1.8.2 =
-Adds the Status tab and support report, fixes cached-page counting, and strengthens statistics recovery and manual Views editing.
+= 1.8.3 =
+Fixes Visit over-counting when browsing across content types, protects other content's views when a post is deleted, and aligns monthly dashboard navigation with the counting clock.

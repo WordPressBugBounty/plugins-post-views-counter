@@ -1091,8 +1091,21 @@ class Post_Views_Counter_Settings {
 				$result = 'promotion_failed';
 		}
 
-		if ( $result === 'completed' )
-			add_settings_error( 'reset_post_views', 'reset_post_views', __( 'All existing data deleted successfully.', 'post-views-counter' ), 'updated' );
+		if ( $result === 'completed' ) {
+			/**
+			 * Filters whether extensions deleted the data they derive from views, once all views were deleted.
+			 *
+			 * An extension deletes its data here and returns false when that failed.
+			 *
+			 * @since 1.8.3
+			 *
+			 * @param bool $deleted Whether the extensions so far deleted their data.
+			 */
+			if ( apply_filters( 'pvc_reset_extension_data', true ) !== false )
+				add_settings_error( 'reset_post_views', 'reset_post_views', __( 'All existing data deleted successfully.', 'post-views-counter' ), 'updated' );
+			else
+				add_settings_error( 'reset_post_views', 'reset_post_views', __( 'Views were deleted, but some related data could not be deleted. Use Delete Views again to retry.', 'post-views-counter' ), 'error' );
+		}
 		elseif ( $result === 'entry_failed' )
 			add_settings_error( 'reset_post_views', 'reset_post_views', __( 'Visits state could not be reset safely, so no data was deleted.', 'post-views-counter' ), 'error' );
 		else

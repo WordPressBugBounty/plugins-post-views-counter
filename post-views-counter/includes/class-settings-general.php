@@ -72,6 +72,11 @@ class Post_Views_Counter_Settings_General {
 				'title'    => __( 'Tracking Targets', 'post-views-counter' ),
 				'callback' => [ $this, 'section_tracking_targets' ],
 			],
+			'post_views_counter_general_data_collection' => [
+				'tab'      => 'general',
+				'title'    => __( 'Data Collection', 'post-views-counter' ),
+				'callback' => [ $this, 'section_data_collection' ],
+			],
 			'post_views_counter_general_tracking_behavior' => [
 				'tab'      => 'general',
 				'title'    => __( 'Tracking Behavior', 'post-views-counter' ),
@@ -172,6 +177,30 @@ class Post_Views_Counter_Settings_General {
 				'section'		=> 'post_views_counter_general_tracking_targets',
 				'type'			=> 'boolean',
 				'label'			=> __( 'Collect aggregate stats about visitors\' browsers, devices, operating systems and referrers.', 'post-views-counter' ),
+				'class'			=> 'pvc-pro',
+				'disabled'		=> true,
+				'skip_saving'	=> true,
+				'value'			=> false,
+				'pro_only'		=> true
+			],
+			'referrers_count' => [
+				'tab'			=> 'general',
+				'title'			=> __( 'Referrers', 'post-views-counter' ),
+				'section'		=> 'post_views_counter_general_data_collection',
+				'type'			=> 'boolean',
+				'label'			=> __( 'Record the referring domain of each counted view, per post.', 'post-views-counter' ),
+				'class'			=> 'pvc-pro',
+				'disabled'		=> true,
+				'skip_saving'	=> true,
+				'value'			=> false,
+				'pro_only'		=> true
+			],
+			'audience_count' => [
+				'tab'			=> 'general',
+				'title'			=> __( 'Audience', 'post-views-counter' ),
+				'section'		=> 'post_views_counter_general_data_collection',
+				'type'			=> 'boolean',
+				'label'			=> __( 'Record the device, browser, operating system and language of counted views, site-wide.', 'post-views-counter' ),
 				'class'			=> 'pvc-pro',
 				'disabled'		=> true,
 				'skip_saving'	=> true,
@@ -587,6 +616,15 @@ class Post_Views_Counter_Settings_General {
 	 */
 	public function section_tracking_targets() {
 		echo '<p class="description">' . esc_html__( 'Control which post types, archives and other content types are included in view counting.', 'post-views-counter' ) . '</p>';
+	}
+
+	/**
+	 * Section description: data collection.
+	 *
+	 * @return void
+	 */
+	public function section_data_collection() {
+		echo '<p class="description">' . esc_html__( 'Choose what is recorded about counted views. Turning a row off stops new recording; data already recorded stays.', 'post-views-counter' ) . '</p>';
 	}
 
 	/**

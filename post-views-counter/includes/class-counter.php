@@ -1184,7 +1184,13 @@ class Post_Views_Counter_Counter {
 			if ( strlen( $storage_data_all ) > self::STORAGE_MAX_PAYLOAD_BYTES )
 				return [ '_pvc_storage_capable' => false ];
 
-			$decoded_payloads = json_decode( stripslashes( $storage_data_all ), true, 8 );
+			// Decode the raw value first: stripping slashes from it would break JSON strings
+			// nested inside the map. A value that does not parse may still carry the slashes
+			// WordPress adds to request data, so retry once without them.
+			$decoded_payloads = json_decode( $storage_data_all, true, 8 );
+
+			if ( json_last_error() === JSON_ERROR_SYNTAX )
+				$decoded_payloads = json_decode( stripslashes( $storage_data_all ), true, 8 );
 
 			if ( json_last_error() !== JSON_ERROR_NONE || ! is_array( $decoded_payloads ) )
 				return [];
@@ -2438,6 +2444,21 @@ class Post_Views_Counter_Counter {
 			'where'		=> [ 'id' => $post_id ],
 			'format'	=> [ '%d' ]
 		];
+
+		// Only post rows carry content 0: term, user and other rows can share the post's
+		// numeric ID, and a site keeps them after the extension that counted them is
+		// deactivated. Without the content column every row is a post row; an unknown
+		// table shape deletes nothing.
+		$visits = Post_Views_Counter()->visits;
+		$status = is_object( $visits ) ? $visits->get_shared_content_column_status() : null;
+
+		if ( $status === true ) {
+			$data['where']['content'] = 0;
+			$data['format'][] = '%d';
+		} elseif ( $status !== false ) {
+			$data['where']['type'] = -1;
+			$data['format'][] = '%d';
+		}
 
 		$data = apply_filters( 'pvc_delete_post_views_where_clause', $data, $post_id );
 
